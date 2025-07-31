@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>编辑配置</title>
+    <link rel="stylesheet" href="/web/css/config_common.css">
+    <link rel="stylesheet" href="/web/css/config_edit.css">
+</head>
+<body>
+    <div class="container">
+        <div class="nav-link">
+            <a href="/web/config.html">&larr; 返回配置列表</a>
+        </div>
+        <h1 id="page-title">添加新配置</h1>
+        <form id="config-form">
+            <div class="form-group">
+                <label for="project">所属工程 (Project)</label>
+                <input type="text" id="project" name="project" placeholder="例如：用户中心">
+                <small>用于对配置进行分组，可不填。</small>
+            </div>
+            <div class="form-group">
+                <label for="remark">备注 (Remark)</label>
+                <input type="text" id="remark" name="remark" placeholder="例如：获取用户信息接口">
+                <small>对此接口配置的简短描述，可不填。</small>
+            </div>
+            <div class="form-group">
+                <label for="endpoint">接口路径 (Endpoint)</label>
+                <input type="text" id="endpoint" name="endpoint" placeholder="/my/custom/api" required>
+                <small>请输入完整的 API 路径，必须以 / 开头。</small>
+            </div>
+            <div class="form-group">
+                <label for="defaultResponse">默认响应内容</label>
+                <textarea id="defaultResponse" name="defaultResponse" placeholder='<?xml version="1.0"?><response>...</response>' required></textarea>
+            </div>
+            <div class="form-buttons">
+                <button type="submit">保存配置</button>
+            </div>
+        </form>
+        <div id="status-message"></div>
+    </div>
+
+    <script src="/web/js/keep_alive.js" defer></script>
+    <script src="/web/js/config_edit.js" defer></script>
+</body>
+</html>

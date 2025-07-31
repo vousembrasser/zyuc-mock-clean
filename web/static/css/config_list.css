@@ -1,0 +1,132 @@
+.page-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.page-actions h1 {
+    margin: 0;
+}
+
+.filter-section {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.filter-section input, .filter-section select {
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.filter-section input {
+    flex-grow: 1;
+}
+
+#configs-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 24px;
+    table-layout: fixed; /* 使用固定布局以防止内容更改列宽 */
+}
+
+#configs-table th, #configs-table td {
+    border: 1px solid var(--border-color);
+    padding: 12px;
+    text-align: left;
+    vertical-align: top;
+    word-wrap: break-word; /* 允许长单词（如URL）断行和换行 */
+}
+
+/* 为固定布局的表格定义列宽 */
+#configs-table th:nth-child(1),
+#configs-table td:nth-child(1) {
+    width: 35%; /* “接口路径/备注”列的宽度 */
+}
+
+/* --- 变更开始 --- */
+#configs-table th:nth-child(3),
+#configs-table td:nth-child(3) {
+    width: 130px; /* 调整“操作”列的宽度 */
+}
+/* --- 变更结束 --- */
+
+
+#configs-table th {
+    background-color: #f8f9fa;
+}
+
+#configs-table .endpoint-cell {
+    word-break: break-all;
+}
+
+#configs-table .endpoint-cell .remark {
+    font-size: 12px;
+    color: #6c757d;
+    margin-top: 4px;
+}
+
+#configs-table tr.project-header td {
+    background-color: #e9ecef;
+    font-weight: 500;
+    padding: 10px 12px;
+}
+
+#configs-table pre {
+    margin: 0;
+    font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+#configs-table .actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap; /* 防止按钮换行 */
+    align-items: flex-start;
+}
+
+/* 所有操作按钮的基本样式 */
+#configs-table .actions button, 
+#configs-table .actions a, 
+.page-actions .add-btn {
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-block;
+    transition: opacity 0.2s, background-color 0.2s;
+    color: white;
+}
+
+#configs-table .actions button:hover, 
+#configs-table .actions a:hover, 
+.page-actions .add-btn:hover {
+    opacity: 0.85;
+}
+
+/* 页面级别大按钮的尺寸（例如，“添加新配置”） */
+.page-actions .add-btn {
+    padding: 10px 20px;
+    background-color: var(--accent-color);
+}
+
+/* 表格行内小按钮的尺寸（例如，“编辑”，“删除”） */
+#configs-table .actions button, 
+#configs-table .actions a {
+    padding: 6px 12px;
+}
+
+/* 特定按钮的颜色 */
+#configs-table .actions .edit-btn {
+    background-color: var(--success-color);
+}
+
+#configs-table .actions .delete-btn {
+    background-color: var(--error-color);
+}

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>请求历史</title>
+    <link rel="stylesheet" href="/web/css/config_common.css">
+    <link rel="stylesheet" href="/web/css/history.css">
+</head>
+<body>
+    <div class="container">
+        <div class="nav-link">
+            <a href="/web/index.html">&larr; 返回实时事件流</a>
+        </div>
+        <div class="list-section">
+            <div class="page-actions">
+                <h1>请求历史</h1>
+            </div>
+
+            <div class="filter-section">
+                <select id="project-filter">
+                    <option value="">所有工程</option>
+                </select>
+                <input type="text" id="search-box" placeholder="按路径或内容模糊搜索...">
+            </div>
+
+            <div id="status-message"></div>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th style="width: 25%;">接口 / 工程</th>
+                        <th style="width: 30%;">请求内容 (Payload)</th>
+                        <th style="width: 30%;">响应内容 (Response)</th>
+                        <th style="width: 15%;">状态 / 时间</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Rows will be injected by JavaScript -->
+                </tbody>
+            </table>
+            <div class="pagination">
+                <!-- Pagination controls will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/web/js/keep_alive.js" defer></script>
+    <script src="/web/js/history.js" defer></script>
+</body>
+</html>
+
