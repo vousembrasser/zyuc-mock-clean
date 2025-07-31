@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,27 +39,35 @@ func New(db *storage.DB, serverAddr string) *EventBroker {
 	}
 }
 
-// HandlePublish is the core mock request handler.
-// It now uses the new GetConfigForRequest logic.
 func (b *EventBroker) HandlePublish(c *gin.Context) {
 	bodyData, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read request body"})
 		return
 	}
-	if len(bodyData) == 0 {
+	
+	bodyString := string(bodyData)
+	if bodyString == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Request body is empty"})
 		return
 	}
-	
+
 	source := b.serverAddr
+	endpoint := c.Request.URL.Path
 
-	// THE FIX: Use the new matching logic that considers both source and endpoint.
-	config, _ := b.db.GetConfigForRequest(c.Request.URL.Path, source)
+	config, _ := b.db.GetConfigForRequest(endpoint, source)
 
-	defaultResponse := `<?xml version="1.0" encoding="UTF-8"?><response><status>SUCCESS</status><message>Global default mock response.</message></response>`
-	if config != nil && config.DefaultResponse != "" {
-		defaultResponse = config.DefaultResponse
+	responseToSend := `<?xml version="1.0" encoding="UTF-8"?><response><status>SUCCESS</status><message>Global default mock response.</message></response>`
+	
+	if config != nil {
+		responseToSend = config.DefaultResponse
+		for _, rule := range config.Rules {
+			if strings.Contains(bodyString, rule.Keyword) {
+				responseToSend = rule.Response
+				log.Printf("broker: Matched keyword '%s' for endpoint '%s'. Responding with specific rule.", rule.Keyword, endpoint)
+				break
+			}
+		}
 	}
 
 	reqID := uuid.New().String()
@@ -68,23 +77,24 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 	}
 
 	if b.bus.InteractiveSubscriberCount() == 0 {
-		log.Printf("broker: No interactive UI clients. Responding immediately for %s from %s", c.Request.URL.Path, source)
-		if err := b.db.CreateEvent(reqID, c.Request.URL.Path, project, string(bodyData), defaultResponse, "Auto-Responded", source); err != nil {
+		log.Printf("broker: No UI clients. Responding immediately for %s.", endpoint)
+		if err := b.db.CreateEvent(reqID, endpoint, project, bodyString, responseToSend, "Auto-Responded", source); err != nil {
 			log.Printf("broker: Failed to save auto-responded event: %v", err)
 		}
-		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(defaultResponse))
+		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseToSend))
 		return
 	}
 
-	if err := b.db.CreateEvent(reqID, c.Request.URL.Path, project, string(bodyData), "", "Pending", source); err != nil {
+	if err := b.db.CreateEvent(reqID, endpoint, project, bodyString, "", "Pending", source); err != nil {
 		log.Printf("broker: Failed to save pending event: %v", err)
 	}
 
 	pr := &PendingRequest{
 		ResponseChan:    make(chan string),
-		Endpoint:        c.Request.URL.Path,
-		DefaultResponse: defaultResponse,
+		Endpoint:        endpoint,
+		DefaultResponse: responseToSend,
 	}
+
 	b.pendingReqsMu.Lock()
 	b.pendingReqs[reqID] = pr
 	b.pendingReqsMu.Unlock()
@@ -97,9 +107,9 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 
 	ssePayload := map[string]string{
 		"requestId":       reqID,
-		"payload":         string(bodyData),
-		"endpoint":        c.Request.URL.Path,
-		"defaultResponse": defaultResponse,
+		"payload":         bodyString,
+		"endpoint":        endpoint,
+		"defaultResponse": responseToSend,
 		"project":         project,
 		"source":          source,
 	}
@@ -110,7 +120,7 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 	case responseBody := <-pr.ResponseChan:
 		log.Printf("broker: Responding to request %s.", reqID)
 		status := "Responded"
-		if responseBody == defaultResponse {
+		if responseBody == responseToSend {
 			currentStatus, _ := b.db.GetEventStatus(reqID)
 			if currentStatus == "Pending" {
 				status = "Responded (Default)"
@@ -122,19 +132,50 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseBody))
 	case <-time.After(10 * time.Second):
 		log.Printf("broker: Request %s timed out.", reqID)
-		b.db.UpdateEventResponse(reqID, defaultResponse, "Timed Out")
-		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(defaultResponse))
+		b.db.UpdateEventResponse(reqID, responseToSend, "Timed Out")
+		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseToSend))
 	case <-c.Request.Context().Done():
 		log.Printf("broker: Caller for request %s disconnected.", reqID)
 		b.db.UpdateEventResponse(reqID, "", "Cancelled")
 	}
 }
 
-// HandleGetConfig is for the 'Edit Config' page.
-// It now uses GetConfigByEndpoint to load the correct record.
+// THE FIX: This handler now expects the configID in the request body, not the URL.
+func (b *EventBroker) HandleAddRule(c *gin.Context) {
+	var req struct {
+		ConfigID uint   `json:"configID"`
+		Keyword  string `json:"keyword"`
+		Response string `json:"response"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Keyword == "" || req.ConfigID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: configID and keyword cannot be empty"})
+		return
+	}
+
+	rule, err := b.db.AddRuleToConfig(req.ConfigID, req.Keyword, req.Response)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add rule"})
+		return
+	}
+	c.JSON(http.StatusOK, rule)
+}
+
+func (b *EventBroker) HandleDeleteRule(c *gin.Context) {
+	ruleID, err := strconv.Atoi(c.Param("ruleID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID"})
+		return
+	}
+
+	if err := b.db.DeleteRule(uint(ruleID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete rule"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "Rule deleted successfully"})
+}
+
 func (b *EventBroker) HandleGetConfig(c *gin.Context) {
 	endpoint := c.Param("endpoint")
-	// THE FIX: Use the specific endpoint getter for loading a config to edit.
 	config, err := b.db.GetConfigByEndpoint(endpoint)
 	if err != nil {
 		log.Printf("broker: Failed to get config for endpoint %s: %v", endpoint, err)
@@ -147,9 +188,6 @@ func (b *EventBroker) HandleGetConfig(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, config)
 }
-
-
-// --- Other Handlers (unchanged, but provided for completeness) ---
 
 func (b *EventBroker) HandleGetConfigSources(c *gin.Context) {
 	sources, err := b.db.GetAllConfigSources()

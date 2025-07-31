@@ -21,6 +21,15 @@ type Config struct {
 	Remark          string
 	DefaultResponse string
 	Source          string `gorm:"index"`
+	Rules           []ResponseRule `gorm:"foreignKey:ConfigID"` // 关联规则
+}
+
+// New Model for Response Rules
+type ResponseRule struct {
+	gorm.Model
+	ConfigID uint   `gorm:"index"`
+	Keyword  string `gorm:"index"`
+	Response string
 }
 
 type Event struct {
@@ -44,7 +53,8 @@ func NewDB(dsn string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = db.AutoMigrate(&Config{}, &Event{}, &ServiceInstance{})
+	// Migrate all tables, including the new ResponseRule
+	err = db.AutoMigrate(&Config{}, &Event{}, &ServiceInstance{}, &ResponseRule{})
 	if err != nil {
 		return nil, err
 	}
@@ -52,39 +62,55 @@ func NewDB(dsn string) (*DB, error) {
 	return &DB{db}, nil
 }
 
-// GetConfigForRequest finds the best matching config for a given request.
-// Priority:
-// 1. Exact match on both Endpoint and Source.
-// 2. Match on Endpoint only, where Source is empty or NULL.
+// --- Rule Methods ---
+
+func (db *DB) GetRulesForConfig(configID uint) ([]ResponseRule, error) {
+	var rules []ResponseRule
+	err := db.Where("config_id = ?", configID).Find(&rules).Error
+	return rules, err
+}
+
+func (db *DB) AddRuleToConfig(configID uint, keyword, response string) (ResponseRule, error) {
+	rule := ResponseRule{
+		ConfigID: configID,
+		Keyword:  keyword,
+		Response: response,
+	}
+	err := db.Create(&rule).Error
+	return rule, err
+}
+
+func (db *DB) DeleteRule(ruleID uint) error {
+	return db.Delete(&ResponseRule{}, ruleID).Error
+}
+
+
+// --- Other Methods ---
+
 func (db *DB) GetConfigForRequest(endpoint, source string) (*Config, error) {
 	var config Config
-
-	// 1. Try to find an exact match for endpoint and source
-	err := db.Where("endpoint = ? AND source = ?", endpoint, source).First(&config).Error
+	err := db.Where("endpoint = ? AND source = ?", endpoint, source).Preload("Rules").First(&config).Error
 	if err == nil {
-		return &config, nil // Found exact match
+		return &config, nil
 	}
 	if err != gorm.ErrRecordNotFound {
-		return nil, err // A real database error occurred
+		return nil, err
 	}
 
-	// 2. If not found, try to find a match for the endpoint with an empty/null source
-	err = db.Where("endpoint = ? AND (source IS NULL OR source = ?)", endpoint, "").First(&config).Error
+	err = db.Where("endpoint = ? AND (source IS NULL OR source = ?)", endpoint, "").Preload("Rules").First(&config).Error
 	if err == nil {
-		return &config, nil // Found endpoint-only match
+		return &config, nil
 	}
 	if err != gorm.ErrRecordNotFound {
-		return nil, err // A real database error occurred
+		return nil, err
 	}
 
-	// 3. No suitable config found
 	return nil, nil
 }
 
-// GetConfigByEndpoint retrieves a config by its endpoint only (for editing purposes).
 func (db *DB) GetConfigByEndpoint(endpoint string) (*Config, error) {
 	var config Config
-	result := db.Where("endpoint = ?", endpoint).First(&config)
+	result := db.Where("endpoint = ?", endpoint).Preload("Rules").First(&config)
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
 			return nil, nil

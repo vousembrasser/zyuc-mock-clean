@@ -5,34 +5,39 @@ import { useEventSource, SseEventData } from '../hooks/useEventSource';
 import { escapeHtml } from '../lib/utils';
 import { format } from 'date-fns';
 
-let bootstrapHost = '127.0.0.1:8080';
-let BOOTSTRAP_URL = 'http://127.0.0.1:8080';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
 
-try {
-    const rawUrl = (process.env.NEXT_PUBLIC_BOOTSTRAP_URL || 'http://127.0.0.1:8080').trim();
-    const urlObject = new URL(rawUrl);
-    bootstrapHost = urlObject.host;
-    BOOTSTRAP_URL = urlObject.toString();
-} catch (e) {
-    console.error("Invalid NEXT_PUBLIC_BOOTSTRAP_URL. Falling back to default.", e);
-}
-
+// 单个事件项的组件
 const EventItem = ({ eventData }: { eventData: SseEventData }) => {
     const { requestId, payload, endpoint, defaultResponse, project, source } = eventData;
     const [responseBody, setResponseBody] = useState(defaultResponse);
     const [status, setStatus] = useState(`将在 3 秒后自动返回默认内容...`);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCompleted, setIsCompleted] = useState(false);
+    const [hasManuallyModified, setHasManuallyModified] = useState(false);
 
     useEffect(() => {
+        if (isCompleted || hasManuallyModified) {
+            return;
+        }
+
         const timerId = setTimeout(() => {
-            if (!isProcessing && !isCompleted) {
+            if (!isProcessing) {
                 sendResponse(defaultResponse, 'Auto-Responded');
             }
         }, 3000);
 
         return () => clearTimeout(timerId);
-    }, [isProcessing, isCompleted, defaultResponse]);
+
+    }, [responseBody, isProcessing, isCompleted, defaultResponse, requestId]);
+
+    const handleResponseChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        if (!hasManuallyModified) {
+            setHasManuallyModified(true);
+            setStatus('请手动点击提交任务');
+        }
+        setResponseBody(e.target.value);
+    };
 
     const sendResponse = async (content: string, responseStatus: string) => {
         if (isProcessing || isCompleted) return;
@@ -50,7 +55,7 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
                 throw new Error(err.error || '无法发送响应。');
             }
             setStatus(`✔ ${responseStatus === 'Custom' ? '自定义响应' : '默认响应'}已成功发送。`);
-            setIsCompleted(true);
+            setIsCompleted(true); 
         } catch (error: any) {
             setStatus(`❌ 发送失败: ${error.message}`);
             setIsProcessing(false);
@@ -63,19 +68,21 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
         const jsonData = JSON.parse(payload);
         displayData = JSON.stringify(jsonData, null, 2);
         dataType = 'is-json';
-    } catch (e) { /* Not JSON */ }
+    } catch (e) { /* 不是JSON，保持原样 */ }
 
     return (
         <li className={`new-event-highlight ${dataType}`}>
             <div className="event-header">
-                <span className="endpoint">请求接口: {escapeHtml(endpoint)} ({project || '未分类'})</span>
+                <span className="endpoint">
+                    请求接口: {source} {endpoint} ({project || '未分类'})
+                </span>
                 <span>接收于: {format(new Date(), 'HH:mm:ss')}</span>
             </div>
             <pre><code>{displayData}</code></pre>
             <div className="response-editor">
                 <textarea
                     value={responseBody}
-                    onChange={(e) => setResponseBody(e.target.value)}
+                    onChange={handleResponseChange}
                     readOnly={isProcessing || isCompleted}
                     style={{ backgroundColor: (isProcessing || isCompleted) ? '#f1f3f5' : 'white' }}
                 />
@@ -91,7 +98,20 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
     );
 };
 
+// 主组件
 const EventStream = () => {
+    let bootstrapHost = '127.0.0.1:8080';
+    let BOOTSTRAP_URL = 'http://127.0.0.1:8080';
+
+    try {
+        const rawUrl = (process.env.NEXT_PUBLIC_BOOTSTRAP_URL || 'http://127.0.0.1:8080').trim();
+        const urlObject = new URL(rawUrl);
+        bootstrapHost = urlObject.host;
+        BOOTSTRAP_URL = urlObject.toString();
+    } catch (e) {
+        console.error("Invalid NEXT_PUBLIC_BOOTSTRAP_URL. Falling back to default.", e);
+    }
+
     const [backendUrls, setBackendUrls] = useState<string[]>([]);
     const { events, connectionStatus } = useEventSource(backendUrls);
     const [projectFilter, setProjectFilter] = useState('');
@@ -137,22 +157,14 @@ const EventStream = () => {
     }, [sourceFilter, connectedSources]);
 
     const groupedEvents = useMemo(() => {
-        // Only filter by text and project here. Source filtering happens during render.
-        const filteredByTextAndProject = events.filter(event => {
-            const projectMatch = !projectFilter || (event.project || '未分类') === projectFilter;
-            const searchMatch = !searchTerm ||
-                event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                event.payload.toLowerCase().includes(searchTerm.toLowerCase());
-            return projectMatch && searchMatch;
-        });
-
-        return filteredByTextAndProject.reduce((acc, event) => {
+        // Grouping happens here, before any visual filtering
+        return events.reduce((acc, event) => {
             const source = event.source || '未知来源';
             if (!acc[source]) acc[source] = [];
             acc[source].push(event);
             return acc;
         }, {} as Record<string, SseEventData[]>);
-    }, [events, projectFilter, searchTerm]);
+    }, [events]);
 
     return (
         <div>
@@ -187,10 +199,10 @@ const EventStream = () => {
                     onChange={e => setSearchTerm(e.target.value)}
                 />
             </div>
-
+            
             <div id="event-groups">
+                {/* THE FINAL FIX: Always render all groups, but use CSS to hide/show them. */}
                 {Object.entries(groupedEvents).map(([source, sourceEvents]) => (
-                    // **THE FIX**: Use CSS to hide/show instead of filtering from the render array
                     <div 
                         key={source} 
                         className="event-group"
@@ -198,9 +210,18 @@ const EventStream = () => {
                     >
                         <h2 className="source-header">来源: {source}</h2>
                         <ul className="events-list">
-                            {sourceEvents.map(event => (
-                                <EventItem key={event.requestId} eventData={event} />
-                            ))}
+                            {sourceEvents
+                                .filter(event => { // Text/Project search still happens here
+                                    const projectMatch = !projectFilter || (event.project || '未分类') === projectFilter;
+                                    const searchMatch = !searchTerm ||
+                                        event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                        event.payload.toLowerCase().includes(searchTerm.toLowerCase());
+                                    return projectMatch && searchMatch;
+                                })
+                                .map(event => (
+                                    <EventItem key={event.requestId} eventData={event} />
+                                ))
+                            }
                         </ul>
                     </div>
                 ))}

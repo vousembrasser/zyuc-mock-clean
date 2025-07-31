@@ -94,9 +94,14 @@ func main() {
 		api.POST("/respond", b.HandleRespond)
 		api.POST("/config", b.HandleSetConfig)
 		api.GET("/configs", b.HandleGetConfigs)
-		api.GET("/configs/sources", b.HandleGetConfigSources) // 新增路由
+		api.GET("/configs/sources", b.HandleGetConfigSources)
 		api.GET("/config/*endpoint", b.HandleGetConfig)
 		api.DELETE("/config/*endpoint", b.HandleDeleteConfig)
+		
+		// THE FIX: Rule routes are now completely separate.
+		api.POST("/rules", b.HandleAddRule)
+		api.DELETE("/rules/:ruleID", b.HandleDeleteRule)
+		
 		api.GET("/history", b.HandleGetHistory)
 		api.GET("/history/sources", b.HandleGetHistorySources)
 	}
