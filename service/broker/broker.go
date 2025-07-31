@@ -9,16 +9,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin" // Corrected the import path
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"mock.com/zyuc-mock-clean/service/bus"
 	"mock.com/zyuc-mock-clean/storage"
 )
 
+// ... (structs and New function) ...
 type PendingRequest struct {
 	ResponseChan    chan string
-	Endpoint        string // Store endpoint to retrieve default response later
-	DefaultResponse string // Store the specific default response for this request
+	Endpoint        string
+	DefaultResponse string
 }
 
 type EventBroker struct {
@@ -36,47 +37,57 @@ func New(db *storage.DB) *EventBroker {
 	}
 }
 
-// CleanupPendingRequests processes all pending requests when the last interactive client disconnects.
-func (b *EventBroker) CleanupPendingRequests() {
-	b.pendingReqsMu.Lock()
-	defer b.pendingReqsMu.Unlock()
 
-	if len(b.pendingReqs) == 0 {
-		return
-	}
-
-	log.Printf("Cleaning up %d pending requests...", len(b.pendingReqs))
-	for reqID, pr := range b.pendingReqs {
-		log.Printf("Auto-responding to pending request %s", reqID)
-		// Send the default response to unblock the waiting handler
-		pr.ResponseChan <- pr.DefaultResponse
-		// Update the database record to show it was auto-responded on disconnect
-		b.db.UpdateEventResponse(reqID, pr.DefaultResponse, "Auto-Responded (Disconnect)")
-	}
-	// Clear the map
-	b.pendingReqs = make(map[string]*PendingRequest)
-}
-
+// HandleSSEConnection with connected and ping events
 func (b *EventBroker) HandleSSEConnection(c *gin.Context) {
 	mode := c.DefaultQuery("mode", "keep-alive")
 	messageChan := b.bus.Subscribe(mode)
 	defer func() {
 		b.bus.Unsubscribe(messageChan)
-		// If the last interactive client just disconnected, clean up pending requests.
 		if mode == "interactive" && b.bus.InteractiveSubscriberCount() == 0 {
 			b.CleanupPendingRequests()
 		}
 	}()
 
+	// 1. Immediately send a 'connected' event
+	c.SSEvent("connected", `{"status": "ok"}`)
+	c.Writer.Flush()
+
+	// 2. Create a ticker for periodic ping events (heartbeat)
+	ticker := time.NewTicker(15 * time.Second) // 15 seconds is a good interval
+	defer ticker.Stop()
+
 	c.Stream(func(w io.Writer) bool {
 		select {
-		case msg := <-messageChan:
+		case msg, ok := <-messageChan:
+			if !ok {
+				return false // Channel closed
+			}
 			c.SSEvent("message", msg)
+			return true
+		case <-ticker.C:
+			c.SSEvent("ping", "keep-alive")
 			return true
 		case <-c.Request.Context().Done():
 			return false
 		}
 	})
+}
+
+// ... (Rest of the file: CleanupPendingRequests, HandlePublish, etc. remains the same) ...
+func (b *EventBroker) CleanupPendingRequests() {
+	b.pendingReqsMu.Lock()
+	defer b.pendingReqsMu.Unlock()
+	if len(b.pendingReqs) == 0 {
+		return
+	}
+	log.Printf("Cleaning up %d pending requests...", len(b.pendingReqs))
+	for reqID, pr := range b.pendingReqs {
+		log.Printf("Auto-responding to pending request %s", reqID)
+		pr.ResponseChan <- pr.DefaultResponse
+		b.db.UpdateEventResponse(reqID, pr.DefaultResponse, "Auto-Responded (Disconnect)")
+	}
+	b.pendingReqs = make(map[string]*PendingRequest)
 }
 
 func (b *EventBroker) HandlePublish(c *gin.Context) {
@@ -153,15 +164,15 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 			}
 		}
 		b.db.UpdateEventResponse(reqID, responseBody, status)
-    c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseBody))
-		case <-time.After(10 * time.Second): // 由5分钟改为10秒
-        log.Printf("broker: Request %s timed out.", reqID)
-        b.db.UpdateEventResponse(reqID, defaultResponse, "Timed Out")
-        c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(defaultResponse))
-    case <-c.Request.Context().Done():
-        log.Printf("broker: Caller for request %s disconnected.", reqID)
-        b.db.UpdateEventResponse(reqID, "", "Cancelled")
-    }
+		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseBody))
+	case <-time.After(10 * time.Second):
+		log.Printf("broker: Request %s timed out.", reqID)
+		b.db.UpdateEventResponse(reqID, defaultResponse, "Timed Out")
+		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(defaultResponse))
+	case <-c.Request.Context().Done():
+		log.Printf("broker: Caller for request %s disconnected.", reqID)
+		b.db.UpdateEventResponse(reqID, "", "Cancelled")
+	}
 }
 
 func (b *EventBroker) HandleRespond(c *gin.Context) {

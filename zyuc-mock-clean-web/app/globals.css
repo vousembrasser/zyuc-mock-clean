@@ -1,0 +1,270 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap');
+
+:root {
+    --bg-color: #f2f2f7; /* iOS 系统浅灰色背景 */
+    --card-bg-color: #ffffff;
+    --text-color: #1c1c1e;
+    --secondary-text-color: #8a8a8e;
+    --border-color: #e5e5ea;
+    --accent-color: #007aff; /* iOS 蓝色 */
+    --accent-color-json: #007aff;
+    --accent-color-text: #34c759; /* iOS 绿色 */
+    --success-color: #28a745;
+    --error-color: #dc3545;
+    --shadow-color: rgba(0, 0, 0, 0.06);
+    --input-bg-color: #f2f2f7; /* iOS 输入框背景色 */
+}
+
+body {
+    font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    margin: 0;
+    padding: 20px;
+}
+
+/* 页面主容器，解决对齐问题 */
+.page-wrapper {
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* 统一的卡片样式 */
+.page-header,
+.content-card {
+    background-color: var(--card-bg-color);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 4px 12px var(--shadow-color);
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.page-header .header-buttons {
+    display: flex;
+    gap: 12px;
+}
+
+/* --- 统一按钮样式 --- */
+
+/* 基础按钮样式 */
+.btn, .config-button, .add-btn, #configs-table .actions .edit-btn, #configs-table .actions .delete-btn {
+    display: inline-block;
+    padding: 9px 16px;
+    border: none;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 14px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn:hover, .config-button:hover, .add-btn:hover {
+    transform: translateY(-1px);
+    opacity: 0.9;
+}
+
+.btn:active, .config-button:active, .add-btn:active {
+    transform: translateY(0px);
+    opacity: 0.8;
+}
+
+/* 主操作按钮 (蓝色) */
+.btn-primary, .page-header .config-button:not(.history-btn), .page-actions .add-btn {
+    background-color: var(--accent-color);
+    color: white;
+}
+.btn-primary:hover, .page-header .config-button:not(.history-btn):hover, .page-actions .add-btn:hover {
+    background-color: #0069d9;
+}
+
+/* 次要/导航按钮 (灰色) */
+.btn-secondary, .page-header .history-btn {
+    background-color: #e5e5ea;
+    color: var(--text-color);
+}
+.btn-secondary:hover, .page-header .history-btn:hover {
+    background-color: #dcdce1;
+}
+
+/* 成功/编辑按钮 (绿色) */
+.btn-success, #configs-table .actions .edit-btn {
+    background-color: var(--success-color);
+    color: white;
+}
+.btn-success:hover, #configs-table .actions .edit-btn:hover {
+     background-color: #218838;
+}
+
+/* 危险/删除按钮 (红色) */
+.btn-danger, #configs-table .actions .delete-btn {
+    background-color: var(--error-color);
+    color: white;
+}
+.btn-danger:hover, #configs-table .actions .delete-btn:hover {
+    background-color: #c82333;
+}
+
+/* 小尺寸按钮 (用于表格内) */
+.btn-sm, #configs-table .actions .edit-btn, #configs-table .actions .delete-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+/* --- iOS 风格筛选区域 --- */
+.filter-section {
+    display: flex;
+    align-items: center;
+    background-color: var(--input-bg-color);
+    border-radius: 10px;
+    padding: 4px;
+    gap: 4px;
+}
+
+.filter-section select,
+.filter-section input {
+    border: none;
+    outline: none;
+    background-color: transparent;
+    padding: 8px 10px;
+    font-size: 15px;
+    color: var(--text-color);
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+}
+
+.filter-section select {
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%238e8e93'%3e%3cpath d='M4.4 6.333L8 9.933l3.6-3.6.933.934L8 11.8l-4.533-4.533z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px;
+    padding-right: 30px;
+    font-weight: 500;
+}
+
+.filter-section input {
+    flex-grow: 1;
+    border-left: 1px solid #d1d1d6; /* 分割线 */
+    padding-left: 12px;
+}
+
+.filter-section input::placeholder {
+    color: #8e8e93;
+}
+
+.connection-status {
+    padding: 0 12px;
+    font-size: 13px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    margin-left: auto;
+}
+
+/* --- 事件流列表样式 --- */
+#events {
+    list-style-type: none;
+    padding: 0;
+    margin-top: 24px;
+}
+
+#events li {
+    background-color: var(--card-bg-color);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    border-left: 5px solid var(--border-color);
+}
+
+#events li.is-json { border-left-color: var(--accent-color-json); }
+#events li.is-text { border-left-color: var(--accent-color-text); }
+.event-header { padding: 8px 20px; background-color: #f8f9fa; border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--secondary-text-color); display: flex; justify-content: space-between; align-items: center; }
+.event-header .endpoint { font-weight: 500; color: #495057; }
+#events pre { margin: 0; padding: 16px 20px; white-space: pre-wrap; word-wrap: break-word; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 14px; }
+.new-event-highlight { animation: fadeIn 0.5s ease-in-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 编辑器样式 */
+.response-editor { padding: 16px 20px; background-color: #f8f9fa; border-top: 1px solid var(--border-color); }
+.response-editor textarea { width: 100%; min-height: 120px; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 14px; margin-bottom: 12px; resize: vertical; }
+.response-editor .controls { display: flex; justify-content: space-between; align-items: center; }
+.response-editor .buttons button { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-family: 'Noto Sans SC', sans-serif; font-weight: 500; transition: transform 0.1s ease-in-out; }
+.response-editor .buttons button:active { transform: scale(0.98); }
+.response-editor .buttons button:disabled { cursor: not-allowed; opacity: 0.6; }
+.response-editor .buttons button.custom-btn { background-color: var(--accent-color-text); color: white; margin-right: 10px; }
+.response-editor .buttons button.default-btn { background-color: var(--accent-color-json); color: white; }
+.response-editor .status { font-size: 12px; color: #dc3545; margin: 0; }
+
+/* --- 其他页面样式 --- */
+.nav-link { text-align: left; margin-bottom: 24px; }
+.nav-link a { text-decoration: none; color: var(--accent-color); font-weight: 500; }
+.page-actions { display: flex; justify-content: space-between; align-items: center; }
+.page-actions h1 { margin: 0; }
+.list-section h1 { margin-bottom: 20px; }
+
+/* --- 表格样式 --- */
+table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+table th, table td { border: 1px solid var(--border-color); padding: 12px; text-align: left; vertical-align: top; word-wrap: break-word; }
+table th { background-color: #f8f9fa; }
+#history-table th, #history-table td { word-break: break-all; }
+#configs-table .actions { display: flex; gap: 8px; flex-wrap: nowrap; align-items: flex-start; }
+#history-table pre, #configs-table pre { margin: 0; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; max-height: 150px; overflow-y: auto; }
+#history-table .endpoint-cell .project, #configs-table .endpoint-cell .remark { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
+#history-table .status-cell .status { font-weight: 500; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; }
+
+/* --- 状态颜色 (已修正) --- */
+.status-Responded,
+.status-Responded--Default- { /* 修正了选择器以匹配 JS 生成的 class */
+    background-color: #eaf5ff;
+    color: #0056b3;
+}
+.status-Auto-Responded,
+.status-Auto-Responded--Disconnect- { /* 修正了选择器 */
+    background-color: #f0fdf4;
+    color: #15803d;
+}
+.status-Timed-Out, .status-Cancelled {
+    background-color: #fffbe6;
+    color: #b45309;
+}
+.status-Pending {
+    background-color: #f3f4f6;
+    color: #4b5563;
+}
+/* --- 状态颜色结束 --- */
+
+#history-table .status-cell .timestamp { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; display: block; }
+.pagination { margin-top: 24px; display: flex; justify-content: center; align-items: center; gap: 8px; }
+.pagination button { padding: 8px 12px; border: 1px solid var(--border-color); background-color: white; cursor: pointer; border-radius: 4px; }
+.pagination button:disabled { cursor: not-allowed; opacity: 0.5; }
+.pagination .page-info { font-size: 14px; }
+
+/* --- 表单样式 --- */
+.form-group { margin-bottom: 20px; }
+.form-group label { display: block; font-weight: 500; margin-bottom: 8px; }
+.form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; box-sizing: border-box; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 14px; }
+.form-group textarea { min-height: 200px; resize: vertical; }
+.form-group small { color: #6c757d; font-size: 12px; }
+.form-buttons button { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-family: 'Noto Sans SC', sans-serif; font-weight: 500; background-color: var(--accent-color); color: white; transition: background-color 0.2s; }
+.form-buttons button:hover { background-color: #0056b3; }
+#status-message { margin-top: 20px; padding: 12px; border-radius: 4px; text-align: center; font-weight: 500; }
+#status-message.success { background-color: #eaf5ff; color: var(--accent-color); }
+#status-message.error { background-color: #fbebeb; color: var(--error-color); }
