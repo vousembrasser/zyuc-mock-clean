@@ -178,14 +178,31 @@ body {
     margin-left: auto;
 }
 
-/* --- 事件流列表样式 --- */
-#events {
-    list-style-type: none;
-    padding: 0;
+/* --- 事件流列表样式 (已修改) --- */
+#event-groups {
     margin-top: 24px;
 }
 
-#events li {
+.event-group {
+    margin-bottom: 32px;
+}
+
+.source-header {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--secondary-text-color);
+    padding: 8px 0;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 16px;
+}
+
+.events-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.events-list li {
     background-color: var(--card-bg-color);
     border-radius: 10px;
     margin-bottom: 16px;
@@ -194,11 +211,19 @@ body {
     border-left: 5px solid var(--border-color);
 }
 
-#events li.is-json { border-left-color: var(--accent-color-json); }
-#events li.is-text { border-left-color: var(--accent-color-text); }
+.events-list li.is-json { border-left-color: var(--accent-color-json); }
+.events-list li.is-text { border-left-color: var(--accent-color-text); }
 .event-header { padding: 8px 20px; background-color: #f8f9fa; border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--secondary-text-color); display: flex; justify-content: space-between; align-items: center; }
 .event-header .endpoint { font-weight: 500; color: #495057; }
-#events pre { margin: 0; padding: 16px 20px; white-space: pre-wrap; word-wrap: break-word; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 14px; }
+.events-list li pre {
+    margin: 0;
+    padding: 16px 20px;
+    white-space: pre-wrap;
+    word-wrap: break-word; /* Fallback */
+    word-break: break-all; /* 强制换行 */
+    font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+}
 .new-event-highlight { animation: fadeIn 0.5s ease-in-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -226,7 +251,16 @@ table th, table td { border: 1px solid var(--border-color); padding: 12px; text-
 table th { background-color: #f8f9fa; }
 #history-table th, #history-table td { word-break: break-all; }
 #configs-table .actions { display: flex; gap: 8px; flex-wrap: nowrap; align-items: flex-start; }
-#history-table pre, #configs-table pre { margin: 0; font-family: 'Menlo', 'Consolas', 'Monaco', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; max-height: 150px; overflow-y: auto; }
+#history-table pre, #configs-table pre {
+    margin: 0;
+    font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    word-break: break-all; /* 增加强制换行 */
+    max-height: 150px;
+    overflow-y: auto;
+}
 #history-table .endpoint-cell .project, #configs-table .endpoint-cell .remark { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
 #history-table .status-cell .status { font-weight: 500; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; }
 
@@ -268,3 +302,46 @@ table th { background-color: #f8f9fa; }
 #status-message { margin-top: 20px; padding: 12px; border-radius: 4px; text-align: center; font-weight: 500; }
 #status-message.success { background-color: #eaf5ff; color: var(--accent-color); }
 #status-message.error { background-color: #fbebeb; color: var(--error-color); }
+
+
+/* --- Service Status Box --- */
+.service-status-container {
+    background-color: var(--card-bg-color);
+    border-radius: 12px;
+    padding: 16px 24px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.service-status-container h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+.connection-status-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.connection-status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: var(--input-bg-color);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+    color: var(--secondary-text-color);
+}
+
+.connection-status-item .status-ok {
+    color: var(--success-color);
+}
+
+.connection-status-item .status-fail {
+    color: var(--error-color);
+}

@@ -5,11 +5,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '../lib/utils';
 
-// 在组件外部或顶部定义
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
 
 const ConfigForm = () => {
-    // ... (组件内部的其他 hooks 和 state 不变) ...
     const router = useRouter();
     const searchParams = useSearchParams();
     const endpointToEdit = searchParams.get('endpoint');
@@ -24,6 +22,7 @@ const ConfigForm = () => {
     const [project, setProject] = useState('');
     const [remark, setRemark] = useState('');
     const [defaultResponse, setDefaultResponse] = useState('');
+    const [source, setSource] = useState(''); // 新增 state for source
     const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
 
     useEffect(() => {
@@ -32,6 +31,7 @@ const ConfigForm = () => {
             setProject(config.Project || '');
             setRemark(config.Remark || '');
             setDefaultResponse(config.DefaultResponse || '');
+            setSource(config.Source || ''); // 填充 source 数据
         }
     }, [isEditMode, config]);
 
@@ -46,11 +46,10 @@ const ConfigForm = () => {
         setStatusMessage({ text: '正在保存...', type: 'success' });
 
         try {
-            // 【修改这里】: 为 fetch 的 URL 添加前缀
             const res = await fetch(`${API_BASE_URL}/api/config`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ endpoint, project, remark, defaultResponse }),
+                body: JSON.stringify({ endpoint, project, remark, defaultResponse, source }), // 在请求体中包含 source
             });
 
             if (!res.ok) {
@@ -68,7 +67,6 @@ const ConfigForm = () => {
         }
     };
 
-    // ... (return JSX 不变) ...
     if (isEditMode && error) return <div>加载配置失败...</div>;
     if (isEditMode && !config) return <div>正在加载配置...</div>;
 
@@ -79,6 +77,12 @@ const ConfigForm = () => {
                 <label htmlFor="project">所属工程 (Project)</label>
                 <input type="text" id="project" value={project} onChange={e => setProject(e.target.value)} placeholder="例如：用户中心" />
                 <small>用于对配置进行分组，可不填。</small>
+            </div>
+            {/* 新增设备输入框 */}
+            <div className="form-group">
+                <label htmlFor="source">设备 (Source)</label>
+                <input type="text" id="source" value={source} onChange={e => setSource(e.target.value)} placeholder="例如：127.0.0.1:8080" />
+                <small>标识此配置主要关联的设备，可不填。</small>
             </div>
             <div className="form-group">
                 <label htmlFor="remark">备注 (Remark)</label>

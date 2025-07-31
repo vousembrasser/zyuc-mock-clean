@@ -15,7 +15,6 @@ import (
 	"mock.com/zyuc-mock-clean/storage"
 )
 
-// ... (structs and New function) ...
 type PendingRequest struct {
 	ResponseChan    chan string
 	Endpoint        string
@@ -27,69 +26,20 @@ type EventBroker struct {
 	db            *storage.DB
 	pendingReqs   map[string]*PendingRequest
 	pendingReqsMu sync.Mutex
+	serverAddr    string
 }
 
-func New(db *storage.DB) *EventBroker {
+func New(db *storage.DB, serverAddr string) *EventBroker {
 	return &EventBroker{
 		bus:         bus.New(),
 		db:          db,
 		pendingReqs: make(map[string]*PendingRequest),
+		serverAddr:  serverAddr,
 	}
 }
 
-
-// HandleSSEConnection with connected and ping events
-func (b *EventBroker) HandleSSEConnection(c *gin.Context) {
-	mode := c.DefaultQuery("mode", "keep-alive")
-	messageChan := b.bus.Subscribe(mode)
-	defer func() {
-		b.bus.Unsubscribe(messageChan)
-		if mode == "interactive" && b.bus.InteractiveSubscriberCount() == 0 {
-			b.CleanupPendingRequests()
-		}
-	}()
-
-	// 1. Immediately send a 'connected' event
-	c.SSEvent("connected", `{"status": "ok"}`)
-	c.Writer.Flush()
-
-	// 2. Create a ticker for periodic ping events (heartbeat)
-	ticker := time.NewTicker(15 * time.Second) // 15 seconds is a good interval
-	defer ticker.Stop()
-
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case msg, ok := <-messageChan:
-			if !ok {
-				return false // Channel closed
-			}
-			c.SSEvent("message", msg)
-			return true
-		case <-ticker.C:
-			c.SSEvent("ping", "keep-alive")
-			return true
-		case <-c.Request.Context().Done():
-			return false
-		}
-	})
-}
-
-// ... (Rest of the file: CleanupPendingRequests, HandlePublish, etc. remains the same) ...
-func (b *EventBroker) CleanupPendingRequests() {
-	b.pendingReqsMu.Lock()
-	defer b.pendingReqsMu.Unlock()
-	if len(b.pendingReqs) == 0 {
-		return
-	}
-	log.Printf("Cleaning up %d pending requests...", len(b.pendingReqs))
-	for reqID, pr := range b.pendingReqs {
-		log.Printf("Auto-responding to pending request %s", reqID)
-		pr.ResponseChan <- pr.DefaultResponse
-		b.db.UpdateEventResponse(reqID, pr.DefaultResponse, "Auto-Responded (Disconnect)")
-	}
-	b.pendingReqs = make(map[string]*PendingRequest)
-}
-
+// HandlePublish is the core mock request handler.
+// It now uses the new GetConfigForRequest logic.
 func (b *EventBroker) HandlePublish(c *gin.Context) {
 	bodyData, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -100,8 +50,12 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Request body is empty"})
 		return
 	}
+	
+	source := b.serverAddr
 
-	config, _ := b.db.GetConfig(c.Request.URL.Path)
+	// THE FIX: Use the new matching logic that considers both source and endpoint.
+	config, _ := b.db.GetConfigForRequest(c.Request.URL.Path, source)
+
 	defaultResponse := `<?xml version="1.0" encoding="UTF-8"?><response><status>SUCCESS</status><message>Global default mock response.</message></response>`
 	if config != nil && config.DefaultResponse != "" {
 		defaultResponse = config.DefaultResponse
@@ -114,15 +68,15 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 	}
 
 	if b.bus.InteractiveSubscriberCount() == 0 {
-		log.Printf("broker: No interactive UI clients. Responding immediately for %s", c.Request.URL.Path)
-		if err := b.db.CreateEvent(reqID, c.Request.URL.Path, project, string(bodyData), defaultResponse, "Auto-Responded"); err != nil {
+		log.Printf("broker: No interactive UI clients. Responding immediately for %s from %s", c.Request.URL.Path, source)
+		if err := b.db.CreateEvent(reqID, c.Request.URL.Path, project, string(bodyData), defaultResponse, "Auto-Responded", source); err != nil {
 			log.Printf("broker: Failed to save auto-responded event: %v", err)
 		}
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(defaultResponse))
 		return
 	}
 
-	if err := b.db.CreateEvent(reqID, c.Request.URL.Path, project, string(bodyData), "", "Pending"); err != nil {
+	if err := b.db.CreateEvent(reqID, c.Request.URL.Path, project, string(bodyData), "", "Pending", source); err != nil {
 		log.Printf("broker: Failed to save pending event: %v", err)
 	}
 
@@ -147,6 +101,7 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 		"endpoint":        c.Request.URL.Path,
 		"defaultResponse": defaultResponse,
 		"project":         project,
+		"source":          source,
 	}
 	ssePayloadJSON, _ := json.Marshal(ssePayload)
 	b.bus.Publish(string(ssePayloadJSON))
@@ -175,6 +130,162 @@ func (b *EventBroker) HandlePublish(c *gin.Context) {
 	}
 }
 
+// HandleGetConfig is for the 'Edit Config' page.
+// It now uses GetConfigByEndpoint to load the correct record.
+func (b *EventBroker) HandleGetConfig(c *gin.Context) {
+	endpoint := c.Param("endpoint")
+	// THE FIX: Use the specific endpoint getter for loading a config to edit.
+	config, err := b.db.GetConfigByEndpoint(endpoint)
+	if err != nil {
+		log.Printf("broker: Failed to get config for endpoint %s: %v", endpoint, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve configuration"})
+		return
+	}
+	if config == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Configuration not found"})
+		return
+	}
+	c.JSON(http.StatusOK, config)
+}
+
+
+// --- Other Handlers (unchanged, but provided for completeness) ---
+
+func (b *EventBroker) HandleGetConfigSources(c *gin.Context) {
+	sources, err := b.db.GetAllConfigSources()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve config sources"})
+		return
+	}
+    if sources == nil {
+        sources = make([]string, 0)
+    }
+	c.JSON(http.StatusOK, sources)
+}
+
+func (b *EventBroker) HandleSetConfig(c *gin.Context) {
+	var req struct {
+		Endpoint        string `json:"endpoint"`
+		Project         string `json:"project"`
+		Remark          string `json:"remark"`
+		DefaultResponse string `json:"defaultResponse"`
+		Source          string `json:"source"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format: " + err.Error()})
+		return
+	}
+	if req.Endpoint == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Endpoint cannot be empty"})
+		return
+	}
+	if err := b.db.SetConfig(req.Endpoint, req.Project, req.Remark, req.DefaultResponse, req.Source); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "Configuration saved successfully"})
+}
+
+func (b *EventBroker) HandleGetConfigs(c *gin.Context) {
+	configs, err := b.db.GetAllConfigs()
+	if err != nil {
+		log.Printf("broker: Failed to get all configs: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve configurations"})
+		return
+	}
+	c.JSON(http.StatusOK, configs)
+}
+
+func (b *EventBroker) HandleGetHistory(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	project := c.Query("project")
+	search := c.Query("search")
+	source := c.Query("source")
+
+	events, total, err := b.db.GetEvents(page, pageSize, project, search, source)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":     events,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
+	})
+}
+
+func (b *EventBroker) HandleGetHistorySources(c *gin.Context) {
+	sources, err := b.db.GetAllEventSources()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve history sources"})
+		return
+	}
+    if sources == nil {
+        sources = make([]string, 0)
+    }
+	c.JSON(http.StatusOK, sources)
+}
+
+func (b *EventBroker) HandleGetServices(c *gin.Context) {
+	activeServices, err := b.db.GetActiveServiceInstances(10 * time.Second)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve active services"})
+		return
+	}
+	c.JSON(http.StatusOK, activeServices)
+}
+
+func (b *EventBroker) CleanupPendingRequests() {
+	b.pendingReqsMu.Lock()
+	defer b.pendingReqsMu.Unlock()
+	if len(b.pendingReqs) == 0 {
+		return
+	}
+	log.Printf("Cleaning up %d pending requests...", len(b.pendingReqs))
+	for reqID, pr := range b.pendingReqs {
+		log.Printf("Auto-responding to pending request %s", reqID)
+		pr.ResponseChan <- pr.DefaultResponse
+		b.db.UpdateEventResponse(reqID, pr.DefaultResponse, "Auto-Responded (Disconnect)")
+	}
+	b.pendingReqs = make(map[string]*PendingRequest)
+}
+
+func (b *EventBroker) HandleSSEConnection(c *gin.Context) {
+	mode := c.DefaultQuery("mode", "keep-alive")
+	messageChan := b.bus.Subscribe(mode)
+	defer func() {
+		b.bus.Unsubscribe(messageChan)
+		if mode == "interactive" && b.bus.InteractiveSubscriberCount() == 0 {
+			b.CleanupPendingRequests()
+		}
+	}()
+
+	c.SSEvent("connected", `{"status": "ok"}`)
+	c.Writer.Flush()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case msg, ok := <-messageChan:
+			if !ok {
+				return false
+			}
+			c.SSEvent("message", msg)
+			return true
+		case <-ticker.C:
+			c.SSEvent("ping", "keep-alive")
+			return true
+		case <-c.Request.Context().Done():
+			return false
+		}
+	})
+}
+
 func (b *EventBroker) HandleRespond(c *gin.Context) {
 	var req struct {
 		RequestID    string `json:"requestId"`
@@ -195,53 +306,6 @@ func (b *EventBroker) HandleRespond(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "Response sent to original caller"})
 }
 
-func (b *EventBroker) HandleSetConfig(c *gin.Context) {
-	var req struct {
-		Endpoint        string `json:"endpoint"`
-		Project         string `json:"project"`
-		Remark          string `json:"remark"`
-		DefaultResponse string `json:"defaultResponse"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format: " + err.Error()})
-		return
-	}
-	if req.Endpoint == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Endpoint cannot be empty"})
-		return
-	}
-	if err := b.db.SetConfig(req.Endpoint, req.Project, req.Remark, req.DefaultResponse); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save configuration"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"status": "Configuration saved successfully"})
-}
-
-func (b *EventBroker) HandleGetConfigs(c *gin.Context) {
-	configs, err := b.db.GetAllConfigs()
-	if err != nil {
-		log.Printf("broker: Failed to get all configs: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve configurations"})
-		return
-	}
-	c.JSON(http.StatusOK, configs)
-}
-
-func (b *EventBroker) HandleGetConfig(c *gin.Context) {
-	endpoint := c.Param("endpoint")
-	config, err := b.db.GetConfig(endpoint)
-	if err != nil {
-		log.Printf("broker: Failed to get config for endpoint %s: %v", endpoint, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve configuration"})
-		return
-	}
-	if config == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Configuration not found"})
-		return
-	}
-	c.JSON(http.StatusOK, config)
-}
-
 func (b *EventBroker) HandleDeleteConfig(c *gin.Context) {
 	endpoint := c.Param("endpoint")
 	if err := b.db.DeleteConfig(endpoint); err != nil {
@@ -249,24 +313,4 @@ func (b *EventBroker) HandleDeleteConfig(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "Configuration deleted successfully"})
-}
-
-func (b *EventBroker) HandleGetHistory(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-	project := c.Query("project")
-	search := c.Query("search")
-
-	events, total, err := b.db.GetEvents(page, pageSize, project, search)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve history"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"data":     events,
-		"total":    total,
-		"page":     page,
-		"pageSize": pageSize,
-	})
 }

@@ -5,36 +5,42 @@ import { useEventSource, SseEventData } from '../hooks/useEventSource';
 import { escapeHtml } from '../lib/utils';
 import { format } from 'date-fns';
 
-// 在组件外部或顶部定义
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+let bootstrapHost = '127.0.0.1:8080';
+let BOOTSTRAP_URL = 'http://127.0.0.1:8080';
 
-// 单个事件项的组件
+try {
+    const rawUrl = (process.env.NEXT_PUBLIC_BOOTSTRAP_URL || 'http://127.0.0.1:8080').trim();
+    const urlObject = new URL(rawUrl);
+    bootstrapHost = urlObject.host;
+    BOOTSTRAP_URL = urlObject.toString();
+} catch (e) {
+    console.error("Invalid NEXT_PUBLIC_BOOTSTRAP_URL. Falling back to default.", e);
+}
+
 const EventItem = ({ eventData }: { eventData: SseEventData }) => {
-    // ... (state 和 useEffect 不变) ...
-    const { requestId, payload, endpoint, defaultResponse, project } = eventData;
+    const { requestId, payload, endpoint, defaultResponse, project, source } = eventData;
     const [responseBody, setResponseBody] = useState(defaultResponse);
     const [status, setStatus] = useState(`将在 3 秒后自动返回默认内容...`);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isCompleted, setIsCompleted] = useState(false);
 
     useEffect(() => {
         const timerId = setTimeout(() => {
-            if (!isProcessing) {
+            if (!isProcessing && !isCompleted) {
                 sendResponse(defaultResponse, 'Auto-Responded');
             }
         }, 3000);
 
         return () => clearTimeout(timerId);
-    }, [defaultResponse, isProcessing]);
-
+    }, [isProcessing, isCompleted, defaultResponse]);
 
     const sendResponse = async (content: string, responseStatus: string) => {
-        if (isProcessing) return;
+        if (isProcessing || isCompleted) return;
         setIsProcessing(true);
         setStatus('⏳ 正在发送响应...');
 
         try {
-            // 【修改这里】: 为 fetch 的 URL 添加前缀
-            const res = await fetch(`${API_BASE_URL}/api/respond`, {
+            const res = await fetch(`http://${source}/api/respond`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ requestId, responseBody: content }),
@@ -44,19 +50,20 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
                 throw new Error(err.error || '无法发送响应。');
             }
             setStatus(`✔ ${responseStatus === 'Custom' ? '自定义响应' : '默认响应'}已成功发送。`);
+            setIsCompleted(true);
         } catch (error: any) {
             setStatus(`❌ 发送失败: ${error.message}`);
+            setIsProcessing(false);
         }
     };
     
-    // ... (return JSX 不变) ...
     let displayData = payload;
     let dataType = 'is-text';
     try {
         const jsonData = JSON.parse(payload);
         displayData = JSON.stringify(jsonData, null, 2);
         dataType = 'is-json';
-    } catch (e) { /* 不是JSON，保持原样 */ }
+    } catch (e) { /* Not JSON */ }
 
     return (
         <li className={`new-event-highlight ${dataType}`}>
@@ -69,14 +76,14 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
                 <textarea
                     value={responseBody}
                     onChange={(e) => setResponseBody(e.target.value)}
-                    readOnly={isProcessing}
-                    style={{ backgroundColor: isProcessing ? '#f1f3f5' : 'white' }}
+                    readOnly={isProcessing || isCompleted}
+                    style={{ backgroundColor: (isProcessing || isCompleted) ? '#f1f3f5' : 'white' }}
                 />
                 <div className="controls">
                     <p className="status">{status}</p>
                     <div className="buttons">
-                        <button onClick={() => sendResponse(responseBody, 'Custom')} disabled={isProcessing} className="custom-btn">返回自定义内容</button>
-                        <button onClick={() => sendResponse(defaultResponse, 'Default')} disabled={isProcessing} className="default-btn">返回默认值</button>
+                        <button onClick={() => sendResponse(responseBody, 'Custom')} disabled={isProcessing || isCompleted} className="custom-btn">返回自定义内容</button>
+                        <button onClick={() => sendResponse(defaultResponse, 'Default')} disabled={isProcessing || isCompleted} className="default-btn">返回默认值</button>
                     </div>
                 </div>
             </div>
@@ -84,55 +91,120 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
     );
 };
 
-// ... (主组件 EventStream 不变) ...
-// 主组件
 const EventStream = () => {
-    const { events, isConnected } = useEventSource('/api/events?mode=interactive');
-    // ... (state and memos) ...
+    const [backendUrls, setBackendUrls] = useState<string[]>([]);
+    const { events, connectionStatus } = useEventSource(backendUrls);
     const [projectFilter, setProjectFilter] = useState('');
+    const [sourceFilter, setSourceFilter] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+
+    useEffect(() => {
+        const fetchServices = async () => {
+            try {
+                const response = await fetch(`${BOOTSTRAP_URL}/api/services`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch service list: ${response.statusText}`);
+                }
+                const services: string[] = await response.json();
+                services.sort();
+                setBackendUrls(currentUrls => JSON.stringify(currentUrls) !== JSON.stringify(services) ? services : currentUrls);
+            } catch (error) {
+                console.error("Error polling for services:", error);
+                setBackendUrls(prev => (prev.length === 0 ? [bootstrapHost] : prev));
+            }
+        };
+        fetchServices();
+        const intervalId = setInterval(fetchServices, 7000);
+        return () => clearInterval(intervalId);
+    }, []);
 
     const allProjects = useMemo(() => {
         const projects = new Set(events.map(e => e.project || '未分类'));
         return [...projects].sort();
     }, [events]);
 
-    const filteredEvents = useMemo(() => {
-        return events.filter(event => {
+    const connectedSources = useMemo(() => {
+        return Object.entries(connectionStatus)
+            .filter(([, isConnected]) => isConnected)
+            .map(([url]) => url)
+            .sort();
+    }, [connectionStatus]);
+    
+    useEffect(() => {
+        if (sourceFilter && !connectedSources.includes(sourceFilter)) {
+            setSourceFilter('');
+        }
+    }, [sourceFilter, connectedSources]);
+
+    const groupedEvents = useMemo(() => {
+        // Only filter by text and project here. Source filtering happens during render.
+        const filteredByTextAndProject = events.filter(event => {
             const projectMatch = !projectFilter || (event.project || '未分类') === projectFilter;
             const searchMatch = !searchTerm ||
                 event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 event.payload.toLowerCase().includes(searchTerm.toLowerCase());
             return projectMatch && searchMatch;
         });
+
+        return filteredByTextAndProject.reduce((acc, event) => {
+            const source = event.source || '未知来源';
+            if (!acc[source]) acc[source] = [];
+            acc[source].push(event);
+            return acc;
+        }, {} as Record<string, SseEventData[]>);
     }, [events, projectFilter, searchTerm]);
 
     return (
         <div>
+            <div className="service-status-container">
+                <h3>后端服务状态</h3>
+                <div className="connection-status-list">
+                   {backendUrls.map(url => (
+                       <div key={url} className="connection-status-item">
+                           <span>{url}</span>
+                           <span className={connectionStatus[url] ? 'status-ok' : 'status-fail'}>
+                               {connectionStatus[url] ? '✅' : '❌'}
+                           </span>
+                       </div>
+                   ))}
+                   {backendUrls.length === 0 && <div className="connection-status-item">连接引导节点 {bootstrapHost}...</div>}
+                </div>
+            </div>
+
             <div className="filter-section">
-                <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+                <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
                     <option value="">所有工程</option>
                     {allProjects.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                 <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}>
+                    <option value="">所有在线设备</option>
+                    {connectedSources.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <input
                     type="text"
                     placeholder="按路径或内容模糊搜索..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={e => setSearchTerm(e.target.value)}
                 />
-                
-                {/* --- 修改这里 --- */}
-                <div className="connection-status">
-                   <span>连接状态: {isConnected ? '✅ 已连接' : '❌ 已断开'}</span>
-                </div>
-                {/* --- 修改结束 --- */}
-
             </div>
-            <ul id="events">
-                {filteredEvents.map(event => (
-                    <EventItem key={event.requestId} eventData={event} />
+
+            <div id="event-groups">
+                {Object.entries(groupedEvents).map(([source, sourceEvents]) => (
+                    // **THE FIX**: Use CSS to hide/show instead of filtering from the render array
+                    <div 
+                        key={source} 
+                        className="event-group"
+                        style={{ display: !sourceFilter || source === sourceFilter ? 'block' : 'none' }}
+                    >
+                        <h2 className="source-header">来源: {source}</h2>
+                        <ul className="events-list">
+                            {sourceEvents.map(event => (
+                                <EventItem key={event.requestId} eventData={event} />
+                            ))}
+                        </ul>
+                    </div>
                 ))}
-            </ul>
+            </div>
         </div>
     );
 };
