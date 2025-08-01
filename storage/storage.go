@@ -9,9 +9,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// 1. 在 ServiceInstance 结构中增加 Protocol 字段
 type ServiceInstance struct {
-	Address    string `gorm:"primaryKey"`
-	LastSeenAt time.Time
+	Address      string `gorm:"primaryKey"`
+	Protocol     string // "http" or "https"
+	RegisteredAt time.Time
+	LastSeenAt   time.Time
 }
 
 type Config struct {
@@ -21,13 +24,12 @@ type Config struct {
 	Remark          string
 	DefaultResponse string
 	Source          string `gorm:"index"`
-	Rules           []ResponseRule `gorm:"foreignKey:ConfigID"` // 关联规则
+	Rules           []ResponseRule `gorm:"foreignKey:ConfigID"`
 }
-
-// New Model for Response Rules
+// ... (其他结构体保持不变)
 type ResponseRule struct {
 	gorm.Model
-	ConfigID uint   `gorm:"index"`
+	ConfigID uint
 	Keyword  string `gorm:"index"`
 	Response string
 }
@@ -48,12 +50,12 @@ type DB struct {
 	*gorm.DB
 }
 
+
 func NewDB(dsn string) (*DB, error) {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
-	// Migrate all tables, including the new ResponseRule
 	err = db.AutoMigrate(&Config{}, &Event{}, &ServiceInstance{}, &ResponseRule{})
 	if err != nil {
 		return nil, err
@@ -62,8 +64,49 @@ func NewDB(dsn string) (*DB, error) {
 	return &DB{db}, nil
 }
 
-// --- Rule Methods ---
+// 2. 更新 UpsertServiceInstance 函数以包含协议信息
+func (db *DB) UpsertServiceInstance(address string, protocol string) error {
+	instance := ServiceInstance{
+		Address:      address,
+		Protocol:     protocol,
+		RegisteredAt: time.Now(),
+		LastSeenAt:   time.Now(),
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "address"}},
+		DoUpdates: clause.AssignmentColumns([]string{"last_seen_at", "protocol"}),
+	}).Create(&instance).Error
+}
 
+// 3. 更新 GetPrimaryServiceInstance 函数以返回完整的实例信息
+func (db *DB) GetPrimaryServiceInstance(timeout time.Duration) (*ServiceInstance, error) {
+	var instance ServiceInstance
+	cutoffTime := time.Now().Add(-timeout)
+	err := db.Where("last_seen_at > ?", cutoffTime).Order("registered_at asc").First(&instance).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// 4. 新增函数，根据地址获取单个服务实例的完整信息
+func (db *DB) GetServiceInstance(address string) (*ServiceInstance, error) {
+	var instance ServiceInstance
+	err := db.Where("address = ?", address).First(&instance).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// --- 其他函数保持不变 ---
+// ... (此处省略未修改的函数代码)
 func (db *DB) GetRulesForConfig(configID uint) ([]ResponseRule, error) {
 	var rules []ResponseRule
 	err := db.Where("config_id = ?", configID).Find(&rules).Error
@@ -83,9 +126,6 @@ func (db *DB) AddRuleToConfig(configID uint, keyword, response string) (Response
 func (db *DB) DeleteRule(ruleID uint) error {
 	return db.Delete(&ResponseRule{}, ruleID).Error
 }
-
-
-// --- Other Methods ---
 
 func (db *DB) GetConfigForRequest(endpoint, source string) (*Config, error) {
 	var config Config
@@ -118,17 +158,6 @@ func (db *DB) GetConfigByEndpoint(endpoint string) (*Config, error) {
 		return nil, result.Error
 	}
 	return &config, nil
-}
-
-func (db *DB) UpsertServiceInstance(address string) error {
-	instance := ServiceInstance{
-		Address:    address,
-		LastSeenAt: time.Now(),
-	}
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "address"}},
-		DoUpdates: clause.AssignmentColumns([]string{"last_seen_at"}),
-	}).Create(&instance).Error
 }
 
 func (db *DB) GetActiveServiceInstances(timeout time.Duration) ([]string, error) {

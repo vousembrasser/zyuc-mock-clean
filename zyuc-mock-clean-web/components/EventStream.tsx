@@ -2,57 +2,83 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useEventSource, SseEventData } from '../hooks/useEventSource';
-import { escapeHtml } from '../lib/utils';
 import { format } from 'date-fns';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+function getApiBaseUrl(): string {
+    if (typeof window !== 'undefined' && (window as any).APP_CONFIG) {
+        return (window as any).APP_CONFIG.apiBaseUrl;
+    }
+    return 'http://localhost:8080';
+}
 
-// 单个事件项的组件
-const EventItem = ({ eventData }: { eventData: SseEventData }) => {
+const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, primaryServiceUrl: string | null }) => {
     const { requestId, payload, endpoint, defaultResponse, project, source } = eventData;
+    
+    // 组件内部状态，只用于UI展示
     const [responseBody, setResponseBody] = useState(defaultResponse);
-    const [status, setStatus] = useState(`将在 3 秒后自动返回默认内容...`);
+    const [status, setStatus] = useState('将在 3 秒后自动返回默认内容...');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCompleted, setIsCompleted] = useState(false);
-    const [hasManuallyModified, setHasManuallyModified] = useState(false);
-
+    const [timerCleared, setTimerCleared] = useState(false);
+    
+    // 纯视觉倒计时
     useEffect(() => {
-        if (isCompleted || hasManuallyModified) {
+        if (isCompleted || timerCleared) {
             return;
         }
-        const timerId = setTimeout(() => {
-            if (!isProcessing) {
-                sendResponse(defaultResponse, 'Auto-Responded');
-            }
-        }, 3000);
-        return () => clearTimeout(timerId);
-    }, [responseBody, isProcessing, isCompleted, defaultResponse, requestId]);
+        
+        let secondsLeft = 2; // 从2开始，因为第一次更新是1秒后
+        setStatus(`将在 3 秒后自动返回默认内容...`);
 
-    const handleResponseChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        if (!hasManuallyModified) {
-            setHasManuallyModified(true);
-            setStatus('请手动点击提交任务');
+        const timerId = setInterval(() => {
+             if (secondsLeft > 0) {
+                 setStatus(`将在 ${secondsLeft} 秒后自动返回默认内容...`);
+                 secondsLeft--;
+             } else {
+                 setStatus('✔ 默认响应已成功发送。');
+                 clearInterval(timerId);
+             }
+        }, 1000);
+
+        return () => clearInterval(timerId);
+    }, [isCompleted, timerCleared]); 
+
+    const handleInteraction = () => {
+        if (!timerCleared) {
+            setTimerCleared(true);
+            setStatus('已手动修改，请点击按钮提交。');
         }
+    };
+    
+    const handleResponseChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        handleInteraction();
         setResponseBody(e.target.value);
     };
 
-    const sendResponse = async (content: string, responseStatus: string) => {
-        if (isProcessing || isCompleted) return;
+    const sendResponse = async (content: string, responseStatus: 'Custom' | 'Default') => {
+        if (isProcessing || isCompleted || !primaryServiceUrl) {
+            setStatus(`❌ 发送失败: 主节点未连接。`);
+            return;
+        }
+        handleInteraction(); // 点击按钮也算交互
         setIsProcessing(true);
         setStatus('⏳ 正在发送响应...');
 
+        const targetUrl = `${primaryServiceUrl}/api/respond`;
+
         try {
-            const res = await fetch(`http://${source}/api/respond`, {
+            const res = await fetch(targetUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ requestId, responseBody: content }),
+                body: JSON.stringify({ requestId, responseBody: content, source }),
             });
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.error || '无法发送响应。');
             }
-            setStatus(`✔ ${responseStatus === 'Custom' ? '自定义响应' : '默认响应'}已成功发送。`);
-            setIsCompleted(true); 
+            const statusText = responseStatus === 'Custom' ? '自定义响应' : '默认响应';
+            setStatus(`✔ ${statusText}已成功发送。`);
+            setIsCompleted(true);
         } catch (error: any) {
             setStatus(`❌ 发送失败: ${error.message}`);
             setIsProcessing(false);
@@ -95,71 +121,42 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
     );
 };
 
-
-// The main component
+// EventStream 组件保持不变
 const EventStream = () => {
+    // ... (代码与上一版本相同)
     const [bootstrapUrl, setBootstrapUrl] = useState('');
     
     useEffect(() => {
-        // Set the URL only after the component mounts and window is available.
-        setBootstrapUrl(getBootstrapUrl());
+        const apiUrl = getApiBaseUrl();
+        setBootstrapUrl(apiUrl);
     }, []);
 
-    const [backendUrls, setBackendUrls] = useState<string[]>([]);
-    const { events, connectionStatus } = useEventSource(backendUrls);
+    const { events, connectionStatus, allServices, primaryService } = useEventSource(bootstrapUrl);
     const [projectFilter, setProjectFilter] = useState('');
     const [sourceFilter, setSourceFilter] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    useEffect(() => {
-        if (!bootstrapUrl) return; // Don't fetch if the bootstrap URL isn't set yet
+    const primaryServiceUrl = useMemo(() => {
+        if (!primaryService || !bootstrapUrl) return null;
+        const protocol = new URL(bootstrapUrl).protocol;
+        return `${protocol}//${primaryService}`;
+    }, [primaryService, bootstrapUrl]);
 
-        const fetchServices = async () => {
-            try {
-                const response = await fetch(`${bootstrapUrl}/api/services`);
-                if (!response.ok) throw new Error(`Failed to fetch service list: ${response.statusText}`);
-                const services: string[] = await response.json();
-                services.sort();
-                setBackendUrls(currentUrls => JSON.stringify(currentUrls) !== JSON.stringify(services) ? services : currentUrls);
-            } catch (error) {
-                console.error("Error polling for services:", error);
-                const host = new URL(bootstrapUrl).host;
-                setBackendUrls(prev => (prev.length === 0 ? [host] : prev));
-            }
-        };
-        fetchServices();
-        const intervalId = setInterval(fetchServices, 7000);
-        return () => clearInterval(intervalId);
-    }, [bootstrapUrl]); // Re-run when bootstrapUrl is set
-
-    // ... (other useMemo and useEffect hooks are the same) ...
     const allProjects = useMemo(() => {
         const projects = new Set(events.map(e => e.project || '未分类'));
         return [...projects].sort();
     }, [events]);
-
-    const connectedSources = useMemo(() => {
-        return Object.entries(connectionStatus)
-            .filter(([, isConnected]) => isConnected)
-            .map(([url]) => url)
-            .sort();
-    }, [connectionStatus]);
     
-    useEffect(() => {
-        if (sourceFilter && !connectedSources.includes(sourceFilter)) {
-            setSourceFilter('');
-        }
-    }, [sourceFilter, connectedSources]);
+    const allSourcesList = useMemo(() => {
+        return [...allServices].sort();
+    }, [allServices]);
 
     const filteredEvents = useMemo(() => {
-        return events.filter(event => {
-            const projectMatch = !projectFilter || (event.project || '未分类') === projectFilter;
-            const sourceMatch = !sourceFilter || event.source === sourceFilter;
-            const searchMatch = !searchTerm ||
-                event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                event.payload.toLowerCase().includes(searchTerm.toLowerCase());
-            return projectMatch && sourceMatch && searchMatch;
-        });
+        return events.filter(event => 
+            (!projectFilter || (event.project || '未分类') === projectFilter) &&
+            (!sourceFilter || event.source === sourceFilter) &&
+            (!searchTerm || event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) || event.payload.toLowerCase().includes(searchTerm.toLowerCase()))
+        );
     }, [events, projectFilter, sourceFilter, searchTerm]);
 
 
@@ -168,15 +165,15 @@ const EventStream = () => {
             <div className="service-status-container">
                 <h3>后端服务状态</h3>
                 <div className="connection-status-list">
-                   {backendUrls.map(url => (
+                   {allServices.map(url => (
                        <div key={url} className="connection-status-item">
-                           <span>{url}</span>
+                           <span>{url} {url === primaryService ? '(主)' : ''}</span>
                            <span className={connectionStatus[url] ? 'status-ok' : 'status-fail'}>
                                {connectionStatus[url] ? '✅' : '❌'}
                            </span>
                        </div>
                    ))}
-                   {backendUrls.length === 0 && <div className="connection-status-item">连接引导节点...</div>}
+                   {allServices.length === 0 && <div className="connection-status-item">正在发现服务...</div>}
                 </div>
             </div>
 
@@ -187,7 +184,7 @@ const EventStream = () => {
                 </select>
                  <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}>
                     <option value="">所有在线设备</option>
-                    {connectedSources.map(s => <option key={s} value={s}>{s}</option>)}
+                    {allSourcesList.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <input
                     type="text"
@@ -199,7 +196,11 @@ const EventStream = () => {
             
             <ul className="events-list">
                 {filteredEvents.map(event => (
-                    <EventItem key={event.requestId} eventData={event} />
+                    <EventItem 
+                        key={event.requestId} 
+                        eventData={event}
+                        primaryServiceUrl={primaryServiceUrl}
+                    />
                 ))}
             </ul>
         </div>

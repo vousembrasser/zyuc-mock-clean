@@ -5,7 +5,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '../lib/utils';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+function getApiBaseUrl(): string {
+    if (typeof window !== 'undefined' && (window as any).APP_CONFIG) {
+        return (window as any).APP_CONFIG.apiBaseUrl || 'http://localhost:8080';
+    }
+    return 'http://localhost:8080';
+}
 
 interface ResponseRule {
     ID: number;
@@ -54,6 +59,7 @@ const ConfigForm = () => {
         
         setStatusMessage({ text: '正在保存...', type: 'info' });
 
+        const API_BASE_URL = getApiBaseUrl(); // 在事件处理函数中获取
         try {
             const res = await fetch(`${API_BASE_URL}/api/config`, {
                 method: 'POST',
@@ -84,6 +90,7 @@ const ConfigForm = () => {
     
     const handleAddRule = async () => {
         if (!newKeyword.trim() || !config?.ID) return;
+        const API_BASE_URL = getApiBaseUrl(); // 在事件处理函数中获取
         try {
             const res = await fetch(`${API_BASE_URL}/api/rules`, {
                 method: 'POST',
@@ -101,9 +108,10 @@ const ConfigForm = () => {
     };
 
     const handleDeleteRule = async (ruleId: number) => {
-        if (confirm('确定要删除这条规则吗？')) {
+       if (confirm('确定要删除这条规则吗？')) {
+            const API_BASE_URL = getApiBaseUrl(); // 在事件处理函数中获取
             try {
-                const res = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, { method: 'DELETE' });
+                 const res = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('删除规则失败');
                 mutateConfig((current: any) => ({ ...current, Rules: current.Rules.filter((r: ResponseRule) => r.ID !== ruleId) }), { revalidate: false });
             } catch (err) {
@@ -140,7 +148,7 @@ const ConfigForm = () => {
                     </div>
                     <div className="form-group">
                         <label htmlFor="defaultResponse">默认响应内容</label>
-                        <textarea id="defaultResponse" value={defaultResponse} onChange={e => setDefaultResponse(e.target.value)} placeholder='<?xml version="1.0"?><response>...</response>' required />
+                        <textarea id="defaultResponse" value={defaultResponse} onChange={e => setDefaultResponse(e.target.value)} placeholder='{"code": 200, "message": "OK" ...}' required />
                     </div>
 
                     <div className="form-buttons">
