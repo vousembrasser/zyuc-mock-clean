@@ -20,15 +20,12 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
         if (isCompleted || hasManuallyModified) {
             return;
         }
-
         const timerId = setTimeout(() => {
             if (!isProcessing) {
                 sendResponse(defaultResponse, 'Auto-Responded');
             }
         }, 3000);
-
         return () => clearTimeout(timerId);
-
     }, [responseBody, isProcessing, isCompleted, defaultResponse, requestId]);
 
     const handleResponseChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -98,19 +95,15 @@ const EventItem = ({ eventData }: { eventData: SseEventData }) => {
     );
 };
 
-// 主组件
-const EventStream = () => {
-    let bootstrapHost = '127.0.0.1:8080';
-    let BOOTSTRAP_URL = 'http://127.0.0.1:8080';
 
-    try {
-        const rawUrl = (process.env.NEXT_PUBLIC_BOOTSTRAP_URL || 'http://127.0.0.1:8080').trim();
-        const urlObject = new URL(rawUrl);
-        bootstrapHost = urlObject.host;
-        BOOTSTRAP_URL = urlObject.toString();
-    } catch (e) {
-        console.error("Invalid NEXT_PUBLIC_BOOTSTRAP_URL. Falling back to default.", e);
-    }
+// The main component
+const EventStream = () => {
+    const [bootstrapUrl, setBootstrapUrl] = useState('');
+    
+    useEffect(() => {
+        // Set the URL only after the component mounts and window is available.
+        setBootstrapUrl(getBootstrapUrl());
+    }, []);
 
     const [backendUrls, setBackendUrls] = useState<string[]>([]);
     const { events, connectionStatus } = useEventSource(backendUrls);
@@ -119,25 +112,27 @@ const EventStream = () => {
     const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
+        if (!bootstrapUrl) return; // Don't fetch if the bootstrap URL isn't set yet
+
         const fetchServices = async () => {
             try {
-                const response = await fetch(`${BOOTSTRAP_URL}/api/services`);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch service list: ${response.statusText}`);
-                }
+                const response = await fetch(`${bootstrapUrl}/api/services`);
+                if (!response.ok) throw new Error(`Failed to fetch service list: ${response.statusText}`);
                 const services: string[] = await response.json();
                 services.sort();
                 setBackendUrls(currentUrls => JSON.stringify(currentUrls) !== JSON.stringify(services) ? services : currentUrls);
             } catch (error) {
                 console.error("Error polling for services:", error);
-                setBackendUrls(prev => (prev.length === 0 ? [bootstrapHost] : prev));
+                const host = new URL(bootstrapUrl).host;
+                setBackendUrls(prev => (prev.length === 0 ? [host] : prev));
             }
         };
         fetchServices();
         const intervalId = setInterval(fetchServices, 7000);
         return () => clearInterval(intervalId);
-    }, []);
+    }, [bootstrapUrl]); // Re-run when bootstrapUrl is set
 
+    // ... (other useMemo and useEffect hooks are the same) ...
     const allProjects = useMemo(() => {
         const projects = new Set(events.map(e => e.project || '未分类'));
         return [...projects].sort();
@@ -156,15 +151,17 @@ const EventStream = () => {
         }
     }, [sourceFilter, connectedSources]);
 
-    const groupedEvents = useMemo(() => {
-        // Grouping happens here, before any visual filtering
-        return events.reduce((acc, event) => {
-            const source = event.source || '未知来源';
-            if (!acc[source]) acc[source] = [];
-            acc[source].push(event);
-            return acc;
-        }, {} as Record<string, SseEventData[]>);
-    }, [events]);
+    const filteredEvents = useMemo(() => {
+        return events.filter(event => {
+            const projectMatch = !projectFilter || (event.project || '未分类') === projectFilter;
+            const sourceMatch = !sourceFilter || event.source === sourceFilter;
+            const searchMatch = !searchTerm ||
+                event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                event.payload.toLowerCase().includes(searchTerm.toLowerCase());
+            return projectMatch && sourceMatch && searchMatch;
+        });
+    }, [events, projectFilter, sourceFilter, searchTerm]);
+
 
     return (
         <div>
@@ -179,7 +176,7 @@ const EventStream = () => {
                            </span>
                        </div>
                    ))}
-                   {backendUrls.length === 0 && <div className="connection-status-item">连接引导节点 {bootstrapHost}...</div>}
+                   {backendUrls.length === 0 && <div className="connection-status-item">连接引导节点...</div>}
                 </div>
             </div>
 
@@ -200,32 +197,11 @@ const EventStream = () => {
                 />
             </div>
             
-            <div id="event-groups">
-                {/* THE FINAL FIX: Always render all groups, but use CSS to hide/show them. */}
-                {Object.entries(groupedEvents).map(([source, sourceEvents]) => (
-                    <div 
-                        key={source} 
-                        className="event-group"
-                        style={{ display: !sourceFilter || source === sourceFilter ? 'block' : 'none' }}
-                    >
-                        <h2 className="source-header">来源: {source}</h2>
-                        <ul className="events-list">
-                            {sourceEvents
-                                .filter(event => { // Text/Project search still happens here
-                                    const projectMatch = !projectFilter || (event.project || '未分类') === projectFilter;
-                                    const searchMatch = !searchTerm ||
-                                        event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                        event.payload.toLowerCase().includes(searchTerm.toLowerCase());
-                                    return projectMatch && searchMatch;
-                                })
-                                .map(event => (
-                                    <EventItem key={event.requestId} eventData={event} />
-                                ))
-                            }
-                        </ul>
-                    </div>
+            <ul className="events-list">
+                {filteredEvents.map(event => (
+                    <EventItem key={event.requestId} eventData={event} />
                 ))}
-            </div>
+            </ul>
         </div>
     );
 };

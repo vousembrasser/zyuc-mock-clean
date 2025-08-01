@@ -13,6 +13,10 @@ export default function RootLayout({
 }) {
     return (
         <html lang="zh-CN">
+            <head>
+                {/* THE FIX: This script will be served dynamically by the Go backend */}
+                <script src="/app.config.js"></script>
+            </head>
             <body>
                 <main className="container" style={{backgroundColor: 'transparent', boxShadow: 'none', padding: 0}}>
                     {children}

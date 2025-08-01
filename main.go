@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-contrib/cors"
+	// "github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"mock.com/zyuc-mock-clean/service/broker"
 	"mock.com/zyuc-mock-clean/storage"
@@ -77,15 +77,15 @@ func main() {
 	b := broker.New(db, regAddr)
 	router := gin.Default()
 
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	// router.Use(cors.New(cors.Config{
+	// 	AllowOrigins:     []string{"http://localhost:3000"},
+	// 	AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+	// 	AllowHeaders:     []string{"Origin", "Content-Type"},
+	// 	AllowCredentials: true,
+	// 	MaxAge:           12 * time.Hour,
+	// }))
 
-	router.Static("/web", "./web/static")
+	// router.Static("/web", "./web/static")
 
 	api := router.Group("/api")
 	{
