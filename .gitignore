@@ -1,4 +1,4 @@
 zyuc-mock-clean-web/.next/
 zyuc-mock-clean-web/node_modules/
 zyuc-mock-clean-web/out/
-./idea
+.idea/
