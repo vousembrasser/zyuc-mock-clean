@@ -123,7 +123,7 @@ func (b *EventBroker) handleCentralPublish(c *gin.Context) {
 	endpoint := c.Request.URL.Path
 
 	config, _ := b.db.GetConfigForRequest(endpoint, source)
-	responseToSend := `<?xml version="1.0" encoding="UTF-8"?><response><status>SUCCESS</status><message>Global default mock response.</message></response>`
+	responseToSend := `{"code": 200, "message": "Global default mock response."}`
 	if config != nil {
 		responseToSend = config.DefaultResponse
 		// ... rule matching logic ...
@@ -177,7 +177,7 @@ func (b *EventBroker) handleCentralPublish(c *gin.Context) {
 		log.Printf("broker [primary]: Responding to request %s with user response.", reqID)
 		b.db.UpdateEventResponse(reqID, responseBody, "Responded (Custom)")
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseBody))
-	case <-time.After(3 * time.Second):
+	case <-time.After(0 * time.Second):
 		log.Printf("broker [primary]: Request %s timed out after 3 seconds.", reqID)
 		b.db.UpdateEventResponse(reqID, responseToSend, "Auto-Responded")
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseToSend))

@@ -27,8 +27,8 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
             return;
         }
         
-        let secondsLeft = 2; // 从2开始，因为第一次更新是1秒后
-        setStatus(`将在 3 秒后自动返回默认内容...`);
+        let secondsLeft = 0; // 从2开始，因为第一次更新是1秒后
+        setStatus(`将在 0 秒后自动返回默认内容...`);
 
         const timerId = setInterval(() => {
              if (secondsLeft > 0) {
@@ -36,10 +36,10 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
                  secondsLeft--;
              } else {
                  setStatus('✔ 默认响应已成功发送。');
+                 setIsCompleted(true);
                  clearInterval(timerId);
              }
-        }, 1000);
-
+        }, 1000);        
         return () => clearInterval(timerId);
     }, [isCompleted, timerCleared]); 
 
@@ -112,8 +112,8 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
                 <div className="controls">
                     <p className="status">{status}</p>
                     <div className="buttons">
-                        <button onClick={() => sendResponse(responseBody, 'Custom')} disabled={isProcessing || isCompleted} className="custom-btn">返回自定义内容</button>
-                        <button onClick={() => sendResponse(defaultResponse, 'Default')} disabled={isProcessing || isCompleted} className="default-btn">返回默认值</button>
+                        <button onClick={() => sendResponse(responseBody, 'Custom')} disabled={isProcessing || isCompleted} className={isCompleted ? "" : "custom-btn"}>返回自定义内容</button>
+                        <button onClick={() => sendResponse(defaultResponse, 'Default')} disabled={isProcessing || isCompleted} className={isCompleted ? "" : "default-btn"}>返回默认值</button>
                     </div>
                 </div>
             </div>

@@ -115,7 +115,7 @@ const ConfigList = () => {
                                             <div className="remark">{escapeHtml(config.Remark || '无备注')}</div>
                                         </td>
                                         <td>
-                                            <pre>{escapeHtml(config.DefaultResponse.substring(0, 150) + (config.DefaultResponse.length > 150 ? '...' : ''))}</pre>
+                                            <pre>{(config.DefaultResponse.substring(0, 150) + (config.DefaultResponse.length > 150 ? '...' : ''))}</pre>
                                         </td>
                                         <td>
                                             <div className="actions">
