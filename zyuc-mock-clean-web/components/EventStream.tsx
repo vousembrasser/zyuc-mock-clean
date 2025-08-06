@@ -12,36 +12,34 @@ function getApiBaseUrl(): string {
 }
 
 const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, primaryServiceUrl: string | null }) => {
-    const { requestId, payload, endpoint, defaultResponse, project, source } = eventData;
-    
-    // 组件内部状态，只用于UI展示
+    const { requestId, defaultResponse, type } = eventData;
+
     const [responseBody, setResponseBody] = useState(defaultResponse);
-    const [status, setStatus] = useState('将在 3 秒后自动返回默认内容...');
+    const [status, setStatus] = useState('将在 0 秒后自动返回默认内容...');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCompleted, setIsCompleted] = useState(false);
     const [timerCleared, setTimerCleared] = useState(false);
-    
-    // 纯视觉倒计时
+
     useEffect(() => {
         if (isCompleted || timerCleared) {
             return;
         }
-        
-        let secondsLeft = 0; // 从2开始，因为第一次更新是1秒后
+
+        let secondsLeft = 0;
         setStatus(`将在 0 秒后自动返回默认内容...`);
 
         const timerId = setInterval(() => {
-             if (secondsLeft > 0) {
-                 setStatus(`将在 ${secondsLeft} 秒后自动返回默认内容...`);
-                 secondsLeft--;
-             } else {
-                 setStatus('✔ 默认响应已成功发送。');
-                 setIsCompleted(true);
-                 clearInterval(timerId);
-             }
-        }, 1000);        
+            if (secondsLeft > 0) {
+                setStatus(`将在 ${secondsLeft} 秒后自动返回默认内容...`);
+                secondsLeft--;
+            } else {
+                setStatus('✔ 默认响应已成功发送。');
+                setIsCompleted(true);
+                clearInterval(timerId);
+            }
+        }, 1000);
         return () => clearInterval(timerId);
-    }, [isCompleted, timerCleared]); 
+    }, [isCompleted, timerCleared]);
 
     const handleInteraction = () => {
         if (!timerCleared) {
@@ -49,7 +47,7 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
             setStatus('已手动修改，请点击按钮提交。');
         }
     };
-    
+
     const handleResponseChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         handleInteraction();
         setResponseBody(e.target.value);
@@ -60,7 +58,7 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
             setStatus(`❌ 发送失败: 主节点未连接。`);
             return;
         }
-        handleInteraction(); // 点击按钮也算交互
+        handleInteraction();
         setIsProcessing(true);
         setStatus('⏳ 正在发送响应...');
 
@@ -70,7 +68,7 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
             const res = await fetch(targetUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ requestId, responseBody: content, source }),
+                body: JSON.stringify({ requestId, responseBody: content, source: eventData.source }),
             });
             if (!res.ok) {
                 const err = await res.json();
@@ -84,24 +82,43 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
             setIsProcessing(false);
         }
     };
-    
-    let displayData = payload;
-    let dataType = 'is-text';
-    try {
-        const jsonData = JSON.parse(payload);
-        displayData = JSON.stringify(jsonData, null, 2);
-        dataType = 'is-json';
-    } catch (e) { /* 不是JSON，保持原样 */ }
+
+    const renderContent = () => {
+        if (type === 'ssh') {
+            return (
+                <>
+                    <div className="event-header">
+                        <span className="endpoint">
+                            SSH 命令: {eventData.source} ({eventData.project || '未分类'})
+                        </span>
+                        <span>接收于: {format(new Date(), 'HH:mm:ss')}</span>
+                    </div>
+                    <pre><code>{eventData.command}</code></pre>
+                </>
+            );
+        }
+        // Default to HTTP
+        let displayData = eventData.payload;
+        try {
+            const jsonData = JSON.parse(eventData.payload || '');
+            displayData = JSON.stringify(jsonData, null, 2);
+        } catch (e) { /* Not JSON, do nothing */ }
+        return (
+            <>
+                <div className="event-header">
+                    <span className="endpoint">
+                        请求接口: {eventData.source} {eventData.endpoint} ({eventData.project || '未分类'})
+                    </span>
+                    <span>接收于: {format(new Date(), 'HH:mm:ss')}</span>
+                </div>
+                <pre><code>{displayData}</code></pre>
+            </>
+        );
+    }
 
     return (
-        <li className={`new-event-highlight ${dataType}`}>
-            <div className="event-header">
-                <span className="endpoint">
-                    请求接口: {source} {endpoint} ({project || '未分类'})
-                </span>
-                <span>接收于: {format(new Date(), 'HH:mm:ss')}</span>
-            </div>
-            <pre><code>{displayData}</code></pre>
+        <li className={`new-event-highlight ${type === 'ssh' ? 'is-ssh' : 'is-http'}`}>
+            {renderContent()}
             <div className="response-editor">
                 <textarea
                     value={responseBody}
@@ -121,11 +138,9 @@ const EventItem = ({ eventData, primaryServiceUrl }: { eventData: SseEventData, 
     );
 };
 
-// EventStream 组件保持不变
 const EventStream = () => {
-    // ... (代码与上一版本相同)
     const [bootstrapUrl, setBootstrapUrl] = useState('');
-    
+
     useEffect(() => {
         const apiUrl = getApiBaseUrl();
         setBootstrapUrl(apiUrl);
@@ -146,16 +161,20 @@ const EventStream = () => {
         const projects = new Set(events.map(e => e.project || '未分类'));
         return [...projects].sort();
     }, [events]);
-    
+
     const allSourcesList = useMemo(() => {
         return [...allServices].sort();
     }, [allServices]);
 
     const filteredEvents = useMemo(() => {
-        return events.filter(event => 
+        return events.filter(event =>
             (!projectFilter || (event.project || '未分类') === projectFilter) &&
             (!sourceFilter || event.source === sourceFilter) &&
-            (!searchTerm || event.endpoint.toLowerCase().includes(searchTerm.toLowerCase()) || event.payload.toLowerCase().includes(searchTerm.toLowerCase()))
+            (!searchTerm ||
+                (event.endpoint && event.endpoint.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (event.payload && event.payload.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                (event.command && event.command.toLowerCase().includes(searchTerm.toLowerCase()))
+            )
         );
     }, [events, projectFilter, sourceFilter, searchTerm]);
 
@@ -165,15 +184,15 @@ const EventStream = () => {
             <div className="service-status-container">
                 <h3>后端服务状态</h3>
                 <div className="connection-status-list">
-                   {allServices.map(url => (
-                       <div key={url} className="connection-status-item">
-                           <span>{url} {url === primaryService ? '(主)' : ''}</span>
-                           <span className={connectionStatus[url] ? 'status-ok' : 'status-fail'}>
+                    {allServices.map(url => (
+                        <div key={url} className="connection-status-item">
+                            <span>{url} {url === primaryService ? '(主)' : ''}</span>
+                            <span className={connectionStatus[url] ? 'status-ok' : 'status-fail'}>
                                {connectionStatus[url] ? '✅' : '❌'}
                            </span>
-                       </div>
-                   ))}
-                   {allServices.length === 0 && <div className="connection-status-item">正在发现服务...</div>}
+                        </div>
+                    ))}
+                    {allServices.length === 0 && <div className="connection-status-item">正在发现服务...</div>}
                 </div>
             </div>
 
@@ -182,22 +201,22 @@ const EventStream = () => {
                     <option value="">所有工程</option>
                     {allProjects.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
-                 <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}>
+                <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}>
                     <option value="">所有在线设备</option>
                     {allSourcesList.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <input
                     type="text"
-                    placeholder="按路径或内容模糊搜索..."
+                    placeholder="按路径、命令或内容模糊搜索..."
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                 />
             </div>
-            
+
             <ul className="events-list">
                 {filteredEvents.map(event => (
-                    <EventItem 
-                        key={event.requestId} 
+                    <EventItem
+                        key={event.requestId}
                         eventData={event}
                         primaryServiceUrl={primaryServiceUrl}
                     />

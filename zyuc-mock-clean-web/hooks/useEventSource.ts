@@ -1,20 +1,14 @@
 import { useState, useEffect } from 'react';
 
-function getBootstrapUrl(): string {
-    if (typeof window !== 'undefined' && (window as any).APP_CONFIG) {
-        return (window as any).APP_CONFIG.apiBaseUrl;
-    }
-    return 'http://localhost:8080'; 
-}
-
-
 export interface SseEventData {
     requestId: string;
-    payload: string;
-    endpoint: string;
+    payload?: string; // HTTP
+    endpoint?: string; // HTTP
+    project?: string;
+    source?: string;
+    command?: string; // SSH
     defaultResponse: string;
-    project: string;
-    source: string; 
+    type: 'http' | 'ssh';
 }
 
 
@@ -28,7 +22,7 @@ export const useEventSource = (bootstrapUrl: string) => {
         if (!bootstrapUrl) return;
 
         let isMounted = true;
-        
+
         const fetchAndConnect = async () => {
             try {
                 const response = await fetch(`${bootstrapUrl}/api/services`);
@@ -36,7 +30,7 @@ export const useEventSource = (bootstrapUrl: string) => {
                     throw new Error(`Failed to fetch service list: ${response.statusText}`);
                 }
                 const { primary, services } = await response.json();
-                
+
                 if (!isMounted) return;
 
                 const activeServices = services || [];
@@ -76,10 +70,10 @@ export const useEventSource = (bootstrapUrl: string) => {
         if (!primaryService) {
             return;
         }
-        
-        const protocol = new URL(bootstrapUrl).protocol; 
+
+        const protocol = new URL(bootstrapUrl).protocol;
         const fullUrl = `${protocol}//${primaryService}/api/events?mode=interactive`;
-        
+
         console.log(`Connecting EventSource to primary: ${fullUrl}`);
         const eventSource = new EventSource(fullUrl);
 
@@ -92,12 +86,15 @@ export const useEventSource = (bootstrapUrl: string) => {
         eventSource.addEventListener('message', (event) => {
             try {
                 const data = JSON.parse(event.data);
+                if (!data.type) {
+                    data.type = 'http'; // Default to http if type is not specified
+                }
                 setEvents(prev => [data, ...prev]);
             } catch (error) {
                 console.error(`Failed to parse SSE message from ${primaryService}:`, error);
             }
         });
-        
+
         eventSource.addEventListener('ping', () => {
              // A ping confirms the primary is still responsive
         });

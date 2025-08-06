@@ -48,3 +48,9 @@ require (
 	modernc.org/memory v1.8.0 // indirect
 	modernc.org/sqlite v1.30.1 // indirect
 )
+
+require (
+	github.com/emirpasic/gods v1.18.1 // indirect
+	go.opentelemetry.io/otel v1.32.0 // indirect
+	go.opentelemetry.io/otel/trace v1.32.0 // indirect
+)

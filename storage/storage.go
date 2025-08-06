@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// 1. 在 ServiceInstance 结构中增加 Protocol 字段
+// 1. 在 ServiceInstance 結構中增加 Protocol 字段
 type ServiceInstance struct {
 	Address      string `gorm:"primaryKey"`
 	Protocol     string // "http" or "https"
@@ -23,10 +23,11 @@ type Config struct {
 	Project         string `gorm:"index"`
 	Remark          string
 	DefaultResponse string
-	Source          string `gorm:"index"`
+	Source          string         `gorm:"index"`
 	Rules           []ResponseRule `gorm:"foreignKey:ConfigID"`
 }
-// ... (其他结构体保持不变)
+
+// ... (其他結構體保持不變)
 type ResponseRule struct {
 	gorm.Model
 	ConfigID uint
@@ -46,17 +47,34 @@ type Event struct {
 	Source       string `gorm:"index"`
 }
 
+type SshConfig struct {
+	gorm.Model
+	Command  string `gorm:"uniqueIndex"`
+	Project  string `gorm:"index"`
+	Remark   string
+	Response string
+}
+
+type SshEvent struct {
+	gorm.Model
+	RequestID    string `gorm:"uniqueIndex"`
+	Command      string `gorm:"index"`
+	Project      string `gorm:"index"`
+	ResponseBody string
+	Status       string
+	Timestamp    time.Time
+}
+
 type DB struct {
 	*gorm.DB
 }
-
 
 func NewDB(dsn string) (*DB, error) {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
-	err = db.AutoMigrate(&Config{}, &Event{}, &ServiceInstance{}, &ResponseRule{})
+	err = db.AutoMigrate(&Config{}, &Event{}, &ServiceInstance{}, &ResponseRule{}, &SshConfig{}, &SshEvent{})
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +82,7 @@ func NewDB(dsn string) (*DB, error) {
 	return &DB{db}, nil
 }
 
-// 2. 更新 UpsertServiceInstance 函数以包含协议信息
+// 2. 更新 UpsertServiceInstance 函數以包含協議信息
 func (db *DB) UpsertServiceInstance(address string, protocol string) error {
 	instance := ServiceInstance{
 		Address:      address,
@@ -78,7 +96,7 @@ func (db *DB) UpsertServiceInstance(address string, protocol string) error {
 	}).Create(&instance).Error
 }
 
-// 3. 更新 GetPrimaryServiceInstance 函数以返回完整的实例信息
+// 3. 更新 GetPrimaryServiceInstance 函數以返回完整的实例信息
 func (db *DB) GetPrimaryServiceInstance(timeout time.Duration) (*ServiceInstance, error) {
 	var instance ServiceInstance
 	cutoffTime := time.Now().Add(-timeout)
@@ -105,8 +123,6 @@ func (db *DB) GetServiceInstance(address string) (*ServiceInstance, error) {
 	return &instance, nil
 }
 
-// --- 其他函数保持不变 ---
-// ... (此处省略未修改的函数代码)
 func (db *DB) GetRulesForConfig(configID uint) ([]ResponseRule, error) {
 	var rules []ResponseRule
 	err := db.Where("config_id = ?", configID).Find(&rules).Error
@@ -120,6 +136,18 @@ func (db *DB) AddRuleToConfig(configID uint, keyword, response string) (Response
 		Response: response,
 	}
 	err := db.Create(&rule).Error
+	return rule, err
+}
+
+func (db *DB) UpdateRule(ruleID uint, keyword, response string) (ResponseRule, error) {
+	var rule ResponseRule
+	err := db.First(&rule, ruleID).Error
+	if err != nil {
+		return rule, err
+	}
+	rule.Keyword = keyword
+	rule.Response = response
+	err = db.Save(&rule).Error
 	return rule, err
 }
 
@@ -282,4 +310,86 @@ func (db *DB) GetAllEventSources() ([]string, error) {
 		return nil, err
 	}
 	return sources, nil
+}
+func (db *DB) SetSshConfig(command, project, remark, response string) error {
+	config := SshConfig{
+		Command:  command,
+		Project:  project,
+		Remark:   remark,
+		Response: response,
+	}
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "command"}},
+		DoUpdates: clause.AssignmentColumns([]string{"project", "remark", "response"}),
+	}).Create(&config).Error
+}
+
+// GetAllSshConfigs retrieves all SSH mock configurations.
+func (db *DB) GetAllSshConfigs() ([]SshConfig, error) {
+	var configs []SshConfig
+	result := db.Order("project, command").Find(&configs)
+	return configs, result.Error
+}
+
+// GetSshConfigForCommand retrieves the configuration for a specific command.
+func (db *DB) GetSshConfigForCommand(command string) (*SshConfig, error) {
+	var config SshConfig
+	err := db.Where("command = ?", command).First(&config).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &config, nil
+}
+
+// DeleteSshConfig removes an SSH mock configuration.
+func (db *DB) DeleteSshConfig(command string) error {
+	return db.Where("command = ?", command).Delete(&SshConfig{}).Error
+}
+
+// CreateSshEvent records a new SSH command event.
+func (db *DB) CreateSshEvent(requestID, command, project, responseBody, status string) error {
+	event := SshEvent{
+		RequestID:    requestID,
+		Command:      command,
+		Project:      project,
+		ResponseBody: responseBody,
+		Status:       status,
+		Timestamp:    time.Now(),
+	}
+	return db.Create(&event).Error
+}
+
+// UpdateSshEventResponse updates the response and status of an SSH command event.
+func (db *DB) UpdateSshEventResponse(requestID, responseBody, status string) error {
+	return db.Model(&SshEvent{}).Where("request_id = ?", requestID).Updates(map[string]interface{}{
+		"response_body": responseBody,
+		"status":        status,
+	}).Error
+}
+
+// GetSshEvents retrieves a paginated list of SSH events.
+func (db *DB) GetSshEvents(page, pageSize int, project, search string) ([]SshEvent, int64, error) {
+	var events []SshEvent
+	var total int64
+	query := db.Model(&SshEvent{})
+	if project != "" {
+		query = query.Where("project = ?", project)
+	}
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("command LIKE ? OR response_body LIKE ?", searchPattern, searchPattern)
+	}
+	err := query.Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * pageSize
+	err = query.Order("timestamp desc").Offset(offset).Limit(pageSize).Find(&events).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return events, total, nil
 }

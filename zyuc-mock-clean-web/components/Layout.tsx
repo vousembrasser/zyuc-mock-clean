@@ -12,33 +12,45 @@ const Layout = ({ children, title }: LayoutProps) => {
     const pathname = usePathname();
 
     const renderHeaderButtons = () => {
-        // 主页: "查看历史" 和 "配置默认响应"
         if (pathname === '/') {
             return (
                 <>
                     <Link href="/history" className="btn btn-secondary">查看历史</Link>
-                    <Link href="/configs" className="btn btn-primary">配置默认响应</Link>
+                    <Link href="/configs" className="btn btn-primary">配置 HTTP 响应</Link>
+                    <Link href="/ssh-configs" className="btn btn-primary">配置 SSH 响应</Link>
                 </>
             );
         }
-        // 配置列表页: "返回" 和 "添加新配置"
         if (pathname === '/configs') {
-             return (
+            return (
                 <>
                     <Link href="/" className="btn btn-secondary">&larr; 返回实时事件流</Link>
-                    <Link href="/configs/edit" className="btn btn-primary">添加新配置</Link>
+                    <Link href="/configs/edit" className="btn btn-primary">添加新 HTTP 配置</Link>
                 </>
             );
         }
-        // 配置编辑页: "返回配置列表"
         if (pathname.startsWith('/configs/edit')) {
             return (
                 <Link href="/configs" className="btn btn-secondary">
-                    &larr; 返回配置列表
+                    &larr; 返回 HTTP 配置列表
                 </Link>
             );
         }
-        // 历史页: "返回实时事件流"
+        if (pathname === '/ssh-configs') {
+            return (
+                <>
+                    <Link href="/" className="btn btn-secondary">&larr; 返回实时事件流</Link>
+                    <Link href="/ssh-configs/edit" className="btn btn-primary">添加新 SSH 配置</Link>
+                </>
+            );
+        }
+        if (pathname.startsWith('/ssh-configs/edit')) {
+            return (
+                <Link href="/ssh-configs" className="btn btn-secondary">
+                    &larr; 返回 SSH 配置列表
+                </Link>
+            );
+        }
         if (pathname.startsWith('/history')) {
             return (
                 <Link href="/" className="btn btn-secondary">

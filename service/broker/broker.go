@@ -45,6 +45,11 @@ func New(db *storage.DB, serverAddr string, useHTTPS bool) *EventBroker {
 	}
 }
 
+// GetBus returns the event bus instance.
+func (b *EventBroker) GetBus() *bus.JsonEventBus {
+	return b.bus
+}
+
 func (b *EventBroker) isPrimary() (bool, *storage.ServiceInstance) {
 	primary, err := b.db.GetPrimaryServiceInstance(10 * time.Second)
 	if err != nil {
@@ -55,6 +60,62 @@ func (b *EventBroker) isPrimary() (bool, *storage.ServiceInstance) {
 		return false, nil
 	}
 	return primary.Address == b.serverAddr, primary
+}
+
+func (b *EventBroker) HandleSetSshConfig(c *gin.Context) {
+	var req struct {
+		Command  string `json:"command"`
+		Project  string `json:"project"`
+		Remark   string `json:"remark"`
+		Response string `json:"response"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format: " + err.Error()})
+		return
+	}
+	if req.Command == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Command cannot be empty"})
+		return
+	}
+	if err := b.db.SetSshConfig(req.Command, req.Project, req.Remark, req.Response); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save SSH configuration"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "SSH configuration saved successfully"})
+}
+
+func (b *EventBroker) HandleGetSshConfigs(c *gin.Context) {
+	configs, err := b.db.GetAllSshConfigs()
+	if err != nil {
+		log.Printf("broker: Failed to get all SSH configs: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve SSH configurations"})
+		return
+	}
+	c.JSON(http.StatusOK, configs)
+}
+
+func (b *EventBroker) HandleGetSshConfig(c *gin.Context) {
+	command := c.Param("command")
+	config, err := b.db.GetSshConfigForCommand(command)
+	if err != nil {
+		log.Printf("broker: Failed to get SSH config for command %s: %v", command, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve SSH configuration"})
+		return
+	}
+	if config == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "SSH configuration not found"})
+		return
+	}
+	c.JSON(http.StatusOK, config)
+}
+
+func (b *EventBroker) HandleDeleteSshConfig(c *gin.Context) {
+	command := c.Param("command")
+	if err := b.db.DeleteSshConfig(command); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete SSH configuration"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "SSH configuration deleted successfully"})
 }
 
 // HandlePublish - 新的调度器/代理逻辑
@@ -142,8 +203,8 @@ func (b *EventBroker) handleCentralPublish(c *gin.Context) {
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseToSend))
 		return
 	}
-	
-	// 如果有UI客户端，则进入3秒等待流程
+
+	// 如果有UI客户端，则进入0秒等待流程
 	log.Printf("broker [primary]: UI client detected. Delaying response for request from %s.", source)
 	if err := b.db.CreateEvent(reqID, endpoint, project, bodyString, "", "Pending", source); err != nil {
 		log.Printf("broker: Failed to save pending event: %v", err)
@@ -166,8 +227,8 @@ func (b *EventBroker) handleCentralPublish(c *gin.Context) {
 	}()
 
 	ssePayload := map[string]string{
-		"requestId":       reqID, "payload": bodyString, "endpoint": endpoint,
-		"defaultResponse": responseToSend, "project": project, "source": source,
+		"requestId": reqID, "payload": bodyString, "endpoint": endpoint,
+		"defaultResponse": responseToSend, "project": project, "source": source, "type": "http",
 	}
 	ssePayloadJSON, _ := json.Marshal(ssePayload)
 	b.bus.Publish(string(ssePayloadJSON))
@@ -178,7 +239,7 @@ func (b *EventBroker) handleCentralPublish(c *gin.Context) {
 		b.db.UpdateEventResponse(reqID, responseBody, "Responded (Custom)")
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseBody))
 	case <-time.After(0 * time.Second):
-		log.Printf("broker [primary]: Request %s timed out after 3 seconds.", reqID)
+		log.Printf("broker [primary]: Request %s timed out after 0 seconds.", reqID)
 		b.db.UpdateEventResponse(reqID, responseToSend, "Auto-Responded")
 		c.Data(http.StatusOK, "application/xml; charset=utf-8", []byte(responseToSend))
 	case <-c.Request.Context().Done():
@@ -187,7 +248,6 @@ func (b *EventBroker) handleCentralPublish(c *gin.Context) {
 	}
 }
 
-
 // HandleRespond - 现在只会被主节点调用
 func (b *EventBroker) HandleRespond(c *gin.Context) {
 	isPrimary, _ := b.isPrimary()
@@ -195,7 +255,7 @@ func (b *EventBroker) HandleRespond(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Only the primary broker can handle responses."})
 		return
 	}
-	
+
 	var req struct {
 		RequestID    string `json:"requestId"`
 		ResponseBody string `json:"responseBody"`
@@ -215,14 +275,12 @@ func (b *EventBroker) HandleRespond(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Request ID not found or already processed"})
 		return
 	}
-	
+
 	// 主节点直接通过通道唤醒正在等待的 handleCentralPublish 协程
 	pendingReq.ResponseChan <- req.ResponseBody
 	c.JSON(http.StatusOK, gin.H{"status": "Response processed by primary."})
 }
 
-// ... 其他所有非 HandlePublish 和 HandleRespond 的函数保持不变 ...
-// ... (此处省略未修改的函数代码)
 func (b *EventBroker) HandleForwardedEvent(c *gin.Context) {
 	isPrimary, _ := b.isPrimary()
 	if !isPrimary {
@@ -256,6 +314,30 @@ func (b *EventBroker) HandleAddRule(c *gin.Context) {
 	c.JSON(http.StatusOK, rule)
 }
 
+func (b *EventBroker) HandleUpdateRule(c *gin.Context) {
+	ruleID, err := strconv.Atoi(c.Param("ruleID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid rule ID"})
+		return
+	}
+
+	var req struct {
+		Keyword  string `json:"keyword"`
+		Response string `json:"response"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Keyword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: keyword cannot be empty"})
+		return
+	}
+
+	rule, err := b.db.UpdateRule(uint(ruleID), req.Keyword, req.Response)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update rule"})
+		return
+	}
+	c.JSON(http.StatusOK, rule)
+}
+
 func (b *EventBroker) HandleDeleteRule(c *gin.Context) {
 	ruleID, err := strconv.Atoi(c.Param("ruleID"))
 	if err != nil {
@@ -269,7 +351,6 @@ func (b *EventBroker) HandleDeleteRule(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "Rule deleted successfully"})
 }
-
 
 func (b *EventBroker) HandleGetConfig(c *gin.Context) {
 	endpoint := c.Param("endpoint")
@@ -292,9 +373,9 @@ func (b *EventBroker) HandleGetConfigSources(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve config sources"})
 		return
 	}
-    if sources == nil {
-        sources = make([]string, 0)
-    }
+	if sources == nil {
+		sources = make([]string, 0)
+	}
 	c.JSON(http.StatusOK, sources)
 }
 
@@ -352,40 +433,60 @@ func (b *EventBroker) HandleGetHistory(c *gin.Context) {
 	})
 }
 
+func (b *EventBroker) HandleGetSshHistory(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	project := c.Query("project")
+	search := c.Query("search")
+
+	events, total, err := b.db.GetSshEvents(page, pageSize, project, search)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve SSH history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":     events,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
+	})
+}
+
 func (b *EventBroker) HandleGetHistorySources(c *gin.Context) {
 	sources, err := b.db.GetAllEventSources()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve history sources"})
 		return
 	}
-    if sources == nil {
-        sources = make([]string, 0)
-    }
+	if sources == nil {
+		sources = make([]string, 0)
+	}
 	c.JSON(http.StatusOK, sources)
 }
 
 func (b *EventBroker) HandleGetServices(c *gin.Context) {
-    primary, err := b.db.GetPrimaryServiceInstance(10 * time.Second)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve primary service"})
-        return
-    }
+	primary, err := b.db.GetPrimaryServiceInstance(10 * time.Second)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve primary service"})
+		return
+	}
 
-    activeServices, err := b.db.GetActiveServiceInstances(10 * time.Second)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve active services"})
-        return
-    }
+	activeServices, err := b.db.GetActiveServiceInstances(10 * time.Second)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve active services"})
+		return
+	}
 
-    primaryAddr := ""
-    if primary != nil {
-        primaryAddr = primary.Address
-    }
+	primaryAddr := ""
+	if primary != nil {
+		primaryAddr = primary.Address
+	}
 
-    c.JSON(http.StatusOK, gin.H{
-        "primary":  primaryAddr,
-        "services": activeServices,
-    })
+	c.JSON(http.StatusOK, gin.H{
+		"primary":  primaryAddr,
+		"services": activeServices,
+	})
 }
 
 func (b *EventBroker) CleanupPendingRequests() {
@@ -404,11 +505,11 @@ func (b *EventBroker) CleanupPendingRequests() {
 }
 
 func (b *EventBroker) HandleSSEConnection(c *gin.Context) {
-    isPrimary, _ := b.isPrimary()
-    if !isPrimary {
-        c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Not the primary broker. Please connect to the primary."})
-        return
-    }
+	isPrimary, _ := b.isPrimary()
+	if !isPrimary {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Not the primary broker. Please connect to the primary."})
+		return
+	}
 	mode := c.DefaultQuery("mode", "keep-alive")
 	messageChan := b.bus.Subscribe(mode)
 	defer func() {

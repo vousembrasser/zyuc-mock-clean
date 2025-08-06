@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"embed"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -18,6 +22,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"mock.com/zyuc-mock-clean/service/broker"
+	"mock.com/zyuc-mock-clean/service/ssh"
 	"mock.com/zyuc-mock-clean/storage"
 )
 
@@ -34,20 +39,35 @@ func getOutboundIP() (string, error) {
 	return localAddr.IP.String(), nil
 }
 
+// generatePrivateKey creates a new RSA private key for the SSH server.
+func generatePrivateKey() (string, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", err
+	}
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPem := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	return string(privateKeyPem), nil
+}
+
 func main() {
 	listenAddr := flag.String("listen", ":8080", "Listen address (e.g., :8080)")
+	sshListenAddr := flag.String("ssh-listen", "", "SSH listen address (e.g., :2222). If not provided, SSH server will not start.")
 	useHTTPS := flag.Bool("https", false, "Enable HTTPS")
 	certFile := flag.String("certfile", "cert.pem", "Path to SSL/TLS certificate file")
 	keyFile := flag.String("keyfile", "key.pem", "Path to SSL/TLS key file")
 	flag.Parse()
 
-	// 1. protocol 变量现在至关重要
 	protocol := "http"
 	if *useHTTPS {
 		protocol = "https"
 	}
 
-	// ... (IP 和端口解析逻辑保持不变)
 	host, port, err := net.SplitHostPort(*listenAddr)
 	if err != nil {
 		host = ""
@@ -67,7 +87,6 @@ func main() {
 	}
 	regAddr := net.JoinHostPort(regHost, port)
 
-
 	db, err := storage.NewDB("mock_config.db")
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -75,8 +94,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
-    // 2. 注册服务时传入 protocol
+
 	if err := db.UpsertServiceInstance(regAddr, protocol); err != nil {
 		log.Fatalf("Failed to register service instance: %v", err)
 	}
@@ -88,7 +106,6 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
-                // 3. 心跳时也传入 protocol
 				if err := db.UpsertServiceInstance(regAddr, protocol); err != nil {
 					log.Printf("Heartbeat failed for %s: %v", regAddr, err)
 				}
@@ -113,11 +130,39 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Broker 的 New 函数现在不再需要 protocol，因为它会在需要时从DB查询
 	b := broker.New(db, regAddr, *useHTTPS)
+
+	// --- Conditionally Start SSH Server ---
+	if *sshListenAddr != "" {
+		privateKeyPath := "ssh_host_key"
+		if _, err := os.Stat(privateKeyPath); os.IsNotExist(err) {
+			log.Println("Generating new SSH private key...")
+			privateKey, err := generatePrivateKey()
+			if err != nil {
+				log.Fatalf("Failed to generate SSH private key: %v", err)
+			}
+			err = os.WriteFile(privateKeyPath, []byte(privateKey), 0600)
+			if err != nil {
+				log.Fatalf("Failed to write SSH private key: %v", err)
+			}
+		}
+
+		privateKey, err := os.ReadFile(privateKeyPath)
+		if err != nil {
+			log.Fatalf("Failed to read SSH private key: %v", err)
+		}
+
+		sshServer, err := ssh.NewSSHServer(b.GetBus(), db, string(privateKey))
+		if err != nil {
+			log.Fatalf("Failed to create SSH server: %v", err)
+		}
+		sshServer.Start(*sshListenAddr)
+	} else {
+		log.Println("SSH server is not configured to start. Use the -ssh-listen flag to enable it.")
+	}
+
 	router := gin.Default()
-	
-	// ... (CORS 和 API 路由设置保持不变)
+
 	config := cors.DefaultConfig()
 	config.AllowAllOrigins = true
 	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
@@ -126,21 +171,31 @@ func main() {
 
 	api := router.Group("/api")
 	{
-		api.GET("/events", b.HandleSSEConnection)
-		api.POST("/events/forward", b.HandleForwardedEvent)
-		api.GET("/services", b.HandleGetServices)
-		api.POST("/respond", b.HandleRespond)
+		// HTTP Mock routes
 		api.POST("/config", b.HandleSetConfig)
 		api.GET("/configs", b.HandleGetConfigs)
 		api.GET("/configs/sources", b.HandleGetConfigSources)
 		api.GET("/config/*endpoint", b.HandleGetConfig)
 		api.DELETE("/config/*endpoint", b.HandleDeleteConfig)
 		api.POST("/rules", b.HandleAddRule)
+		api.PUT("/rules/:ruleID", b.HandleUpdateRule)
 		api.DELETE("/rules/:ruleID", b.HandleDeleteRule)
+
+		// SSH Mock routes
+		api.POST("/ssh/config", b.HandleSetSshConfig)
+		api.GET("/ssh/configs", b.HandleGetSshConfigs)
+		api.GET("/ssh/config/:command", b.HandleGetSshConfig)
+		api.DELETE("/ssh/config/:command", b.HandleDeleteSshConfig)
+		api.GET("/ssh/history", b.HandleGetSshHistory)
+
+		// Common routes
+		api.GET("/events", b.HandleSSEConnection)
+		api.POST("/events/forward", b.HandleForwardedEvent)
+		api.GET("/services", b.HandleGetServices)
+		api.POST("/respond", b.HandleRespond)
 		api.GET("/history", b.HandleGetHistory)
 		api.GET("/history/sources", b.HandleGetHistorySources)
 	}
-
 
 	router.GET("/app.config.js", func(c *gin.Context) {
 		jsContent := fmt.Sprintf(`window.APP_CONFIG = { apiBaseUrl: "%s://%s" };`, protocol, regAddr)
@@ -150,7 +205,7 @@ func main() {
 	router.NoRoute(func(c *gin.Context) {
 		if c.Request.Method != "POST" && c.Request.Method != "PUT" && c.Request.Method != "PATCH" &&
 			!strings.HasPrefix(c.Request.URL.Path, "/api/") {
-			
+
 			fsys, err := fs.Sub(embeddedFiles, "zyuc-mock-clean-web/out")
 			if err != nil {
 				log.Printf("Failed to get sub filesystem: %v", err)
