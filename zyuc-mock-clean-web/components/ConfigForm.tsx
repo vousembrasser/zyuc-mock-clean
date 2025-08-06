@@ -22,7 +22,7 @@ const ConfigForm = () => {
     const router = useRouter();
     const searchParams = useSearchParams();
     const endpointToEdit = searchParams.get('endpoint');
-    
+
     const [isEditMode, setIsEditMode] = useState(!!endpointToEdit);
     const [currentEndpoint, setCurrentEndpoint] = useState(endpointToEdit);
     const [activeView, setActiveView] = useState<'config' | 'rules'>('config');
@@ -36,10 +36,12 @@ const ConfigForm = () => {
     const [defaultResponse, setDefaultResponse] = useState('');
     const [source, setSource] = useState('');
     const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
-    
+
     const [newKeyword, setNewKeyword] = useState('');
     const [newResponse, setNewResponse] = useState('');
-    
+
+    const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
+
     useEffect(() => {
         if (isEditMode && config) {
             setProject(config.Project || '');
@@ -56,7 +58,7 @@ const ConfigForm = () => {
             setStatusMessage({ text: '接口路径必须以 / 开头。', type: 'error' });
             return;
         }
-        
+
         setStatusMessage({ text: '正在保存...', type: 'info' });
 
         const API_BASE_URL = getApiBaseUrl(); // 在事件处理函数中获取
@@ -71,23 +73,28 @@ const ConfigForm = () => {
                 const err = await res.json();
                 throw new Error(err.error || '保存失败');
             }
-            
+
             setStatusMessage({ text: '配置已成功保存！', type: 'success' });
-            
+
             if (!isEditMode) {
-                const newUrl = `/configs/edit?endpoint=${encodeURIComponent(endpointInput)}`;
-                window.history.pushState({ path: newUrl }, '', newUrl);
-                setIsEditMode(true);
-                setCurrentEndpoint(endpointInput);
-                setActiveView('rules');
+                router.push(`/configs/edit?endpoint=${encodeURIComponent(endpointInput)}`);
+            } else {
+                mutateConfig();
             }
-            mutateConfig();
 
         } catch (err: any) {
             setStatusMessage({ text: `错误: ${err.message}`, type: 'error' });
         }
     };
-    
+
+    const handleRuleSubmit = async () => {
+        if (editingRuleId) {
+            await handleUpdateRule(editingRuleId);
+        } else {
+            await handleAddRule();
+        }
+    };
+
     const handleAddRule = async () => {
         if (!newKeyword.trim() || !config?.ID) return;
         const API_BASE_URL = getApiBaseUrl(); // 在事件处理函数中获取
@@ -107,11 +114,45 @@ const ConfigForm = () => {
         }
     };
 
+    const handleUpdateRule = async (ruleId: number) => {
+        const API_BASE_URL = getApiBaseUrl();
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword: newKeyword, response: newResponse }),
+            });
+            if (!res.ok) throw new Error('更新规则失败');
+            const updatedRule = await res.json();
+            mutateConfig((current: any) => ({
+                ...current,
+                Rules: current.Rules.map((r: ResponseRule) => (r.ID === ruleId ? updatedRule : r)),
+            }), { revalidate: false });
+            setEditingRuleId(null);
+            setNewKeyword('');
+            setNewResponse('');
+        } catch (err) {
+            alert('更新规则失败，请检查服务日志。');
+        }
+    };
+
+    const handleEditClick = (rule: ResponseRule) => {
+        setEditingRuleId(rule.ID);
+        setNewKeyword(rule.Keyword);
+        setNewResponse(rule.Response);
+    };
+
+    const handleCancelEdit = () => {
+        setEditingRuleId(null);
+        setNewKeyword('');
+        setNewResponse('');
+    };
+
     const handleDeleteRule = async (ruleId: number) => {
-       if (confirm('确定要删除这条规则吗？')) {
+        if (confirm('确定要删除这条规则吗？')) {
             const API_BASE_URL = getApiBaseUrl(); // 在事件处理函数中获取
             try {
-                 const res = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, { method: 'DELETE' });
+                const res = await fetch(`${API_BASE_URL}/api/rules/${ruleId}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('删除规则失败');
                 mutateConfig((current: any) => ({ ...current, Rules: current.Rules.filter((r: ResponseRule) => r.ID !== ruleId) }), { revalidate: false });
             } catch (err) {
@@ -170,48 +211,49 @@ const ConfigForm = () => {
                 </div>
                 <div className="rules-card-content">
                     <p>如果请求内容包含关键字，将返回特定响应，否则返回默认响应。</p>
-                    
+
                     {!isEditMode && (
                         <div className="rules-disabled-overlay">
                             <p>请先保存主配置以启用规则管理</p>
                         </div>
                     )}
-                    
+
                     <table className="rules-table">
                         <thead>
-                            <tr>
-                                <th>关键字</th>
-                                <th>预览</th>
-                                <th>操作</th>
-                            </tr>
+                        <tr>
+                            <th>关键字</th>
+                            <th>预览</th>
+                            <th>操作</th>
+                        </tr>
                         </thead>
                         <tbody>
-                            {config?.Rules && config.Rules.length > 0 ? (
-                                config.Rules.map((rule: ResponseRule) => (
-                                    <tr key={rule.ID}>
-                                        <td><pre>{rule.Keyword}</pre></td>
-                                        <td>
+                        {config?.Rules && config.Rules.length > 0 ? (
+                            config.Rules.map((rule: ResponseRule) => (
+                                <tr key={rule.ID}>
+                                    <td><pre>{rule.Keyword}</pre></td>
+                                    <td>
                                             <pre>
-                                                {rule.Response.length > 100 
-                                                    ? `${rule.Response.substring(0, 100)}...` 
+                                                {rule.Response.length > 100
+                                                    ? `${rule.Response.substring(0, 100)}...`
                                                     : rule.Response}
                                             </pre>
-                                        </td>
-                                        <td>
-                                            <button onClick={() => handleDeleteRule(rule.ID)} className="btn btn-sm btn-danger">删除</button>
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td colSpan={3} style={{ textAlign: 'center' }}>暂无规则。</td>
+                                    </td>
+                                    <td>
+                                        <button onClick={() => handleEditClick(rule)} className="btn btn-sm btn-success">编辑</button>
+                                        <button onClick={() => handleDeleteRule(rule.ID)} className="btn btn-sm btn-danger">删除</button>
+                                    </td>
                                 </tr>
-                            )}
+                            ))
+                        ) : (
+                            <tr>
+                                <td colSpan={3} style={{ textAlign: 'center' }}>暂无规则。</td>
+                            </tr>
+                        )}
                         </tbody>
                     </table>
 
                     <div className="add-rule-form">
-                        <h3>添加新规则</h3>
+                        <h3>{editingRuleId ? '编辑规则' : '添加新规则'}</h3>
                         <div className="form-group">
                             <label htmlFor="newKeyword">关键字</label>
                             <input type="text" id="newKeyword" value={newKeyword} onChange={e => setNewKeyword(e.target.value)} placeholder="请求内容中包含的文本" />
@@ -220,7 +262,10 @@ const ConfigForm = () => {
                             <label htmlFor="newResponse">特定响应</label>
                             <textarea id="newResponse" value={newResponse} onChange={e => setNewResponse(e.target.value)} placeholder="如果找到关键字，返回此内容"></textarea>
                         </div>
-                        <button onClick={handleAddRule} disabled={!isEditMode} className="btn btn-primary">添加规则</button>
+                        <button onClick={handleRuleSubmit} disabled={!isEditMode} className="btn btn-primary">{editingRuleId ? '更新规则' : '添加规则'}</button>
+                        {editingRuleId && (
+                            <button onClick={handleCancelEdit} className="btn btn-secondary">取消编辑</button>
+                        )}
                     </div>
                 </div>
             </div>

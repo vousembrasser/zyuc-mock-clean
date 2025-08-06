@@ -12,7 +12,7 @@ interface EventHistory {
     ResponseBody: string;
     Status: string;
     Timestamp: string;
-    Source: string; 
+    Source: string;
 }
 
 interface HistoryResponse {
@@ -33,7 +33,7 @@ const HistoryList = () => {
         setPage(1);
         setDebouncedSearchTerm(value);
     }, 300), []);
-    
+
     const handleFilterChange = (setter: React.Dispatch<React.SetStateAction<string>>) => (e: React.ChangeEvent<HTMLSelectElement>) => {
         setPage(1);
         setter(e.target.value);
@@ -50,9 +50,9 @@ const HistoryList = () => {
         fetcher,
         { keepPreviousData: true }
     );
-    
+
     const { data: configs, error: configsError } = useSWR<any[]>('/api/configs', fetcher);
-    
+
     // This hook now correctly fetches from the restored endpoint
     const { data: allSources, error: sourcesError } = useSWR<string[]>('/api/history/sources', fetcher);
 
@@ -73,7 +73,7 @@ const HistoryList = () => {
     return (
         <div className="list-section">
             <div className="filter-section">
-                 <select value={projectFilter} onChange={handleFilterChange(setProjectFilter)}>
+                <select value={projectFilter} onChange={handleFilterChange(setProjectFilter)}>
                     <option value="">所有工程</option>
                     {allProjects.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
@@ -89,35 +89,35 @@ const HistoryList = () => {
                 />
             </div>
             <table id="history-table">
-                 <thead>
-                    <tr>
-                        <th style={{width: '20%'}}>接口 / 工程</th>
-                        <th style={{width: '15%'}}>来源 (IP:Port)</th>
-                        <th style={{width: '25%'}}>请求内容 (Payload)</th>
-                        <th style={{width: '25%'}}>响应内容 (Response)</th>
-                        <th style={{width: '15%'}}>状态 / 时间</th>
-                    </tr>
+                <thead>
+                <tr>
+                    <th style={{width: '20%'}}>接口 / 工程</th>
+                    <th style={{width: '15%'}}>来源 (IP:Port)</th>
+                    <th style={{width: '25%'}}>请求内容 (Payload)</th>
+                    <th style={{width: '25%'}}>响应内容 (Response)</th>
+                    <th style={{width: '15%'}}>状态 / 时间</th>
+                </tr>
                 </thead>
                 <tbody>
-                    {data && data.length > 0 ? (
-                        data.map((event, index) => (
-                            <tr key={index}>
-                                <td className="endpoint-cell">
-                                    <div>{event.Endpoint}</div>
-                                    <div className="project">{event.Project || '未分类'}</div>
-                                </td>
-                                <td>{event.Source || 'N/A'}</td>
-                                <td><pre>{event.Payload}</pre></td>
-                                <td><pre>{event.ResponseBody}</pre></td>
-                                <td className="status-cell">
-                                    <span className={`status status-${event.Status.replace(/[\s()]/g, '-')}`}>{event.Status}</span>
-                                    <span className="timestamp">{format(new Date(event.Timestamp), 'yyyy-MM-dd HH:mm:ss')}</span>
-                                </td>
-                            </tr>
-                        ))
-                    ) : (
-                        <tr><td colSpan={5} style={{ textAlign: 'center' }}>未找到历史记录。</td></tr>
-                    )}
+                {data && data.length > 0 ? (
+                    data.map((event, index) => (
+                        <tr key={index}>
+                            <td className="endpoint-cell">
+                                <div>{event.Endpoint}</div>
+                                <div className="project">{event.Project || '未分类'}</div>
+                            </td>
+                            <td>{event.Source || 'N/A'}</td>
+                            <td><pre>{event.Payload}</pre></td>
+                            <td><pre>{event.ResponseBody}</pre></td>
+                            <td className="status-cell">
+                                <span className={`status status-${event.Status.replace(/[\s()]/g, '-')}`}>{event.Status}</span>
+                                <span className="timestamp">{format(new Date(event.Timestamp), 'yyyy-MM-dd HH:mm:ss')}</span>
+                            </td>
+                        </tr>
+                    ))
+                ) : (
+                    <tr><td colSpan={5} style={{ textAlign: 'center' }}>未找到历史记录。</td></tr>
+                )}
                 </tbody>
             </table>
             <div className="pagination">

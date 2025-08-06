@@ -15,7 +15,8 @@ const Layout = ({ children, title }: LayoutProps) => {
         if (pathname === '/') {
             return (
                 <>
-                    <Link href="/history" className="btn btn-secondary">查看历史</Link>
+                    <Link href="/history" className="btn btn-secondary">查看 HTTP 历史</Link>
+                    <Link href="/ssh-history" className="btn btn-secondary">查看 SSH 历史</Link>
                     <Link href="/configs" className="btn btn-primary">配置 HTTP 响应</Link>
                     <Link href="/ssh-configs" className="btn btn-primary">配置 SSH 响应</Link>
                 </>
@@ -52,6 +53,13 @@ const Layout = ({ children, title }: LayoutProps) => {
             );
         }
         if (pathname.startsWith('/history')) {
+            return (
+                <Link href="/" className="btn btn-secondary">
+                    &larr; 返回实时事件流
+                </Link>
+            );
+        }
+        if (pathname.startsWith('/ssh-history')) {
             return (
                 <Link href="/" className="btn btn-secondary">
                     &larr; 返回实时事件流
