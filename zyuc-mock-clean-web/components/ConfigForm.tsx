@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { fetcher } from '../lib/utils';
+import Link from "next/link";
 
 function getApiBaseUrl(): string {
     if (typeof window !== 'undefined' && (window as any).APP_CONFIG) {
@@ -41,6 +42,8 @@ const ConfigForm = () => {
     const [newResponse, setNewResponse] = useState('');
 
     const [editingRuleId, setEditingRuleId] = useState<number | null>(null);
+
+    const ruleFormRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (isEditMode && config) {
@@ -140,6 +143,7 @@ const ConfigForm = () => {
         setEditingRuleId(rule.ID);
         setNewKeyword(rule.Keyword);
         setNewResponse(rule.Response);
+        ruleFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     };
 
     const handleCancelEdit = () => {
@@ -218,41 +222,45 @@ const ConfigForm = () => {
                         </div>
                     )}
 
-                    <table className="rules-table">
-                        <thead>
-                        <tr>
-                            <th>关键字</th>
-                            <th>预览</th>
-                            <th>操作</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {config?.Rules && config.Rules.length > 0 ? (
-                            config.Rules.map((rule: ResponseRule) => (
-                                <tr key={rule.ID}>
-                                    <td><pre>{rule.Keyword}</pre></td>
-                                    <td>
-                                            <pre>
-                                                {rule.Response.length > 100
-                                                    ? `${rule.Response.substring(0, 100)}...`
-                                                    : rule.Response}
-                                            </pre>
-                                    </td>
-                                    <td>
-                                        <button onClick={() => handleEditClick(rule)} className="btn btn-sm btn-success">编辑</button>
-                                        <button onClick={() => handleDeleteRule(rule.ID)} className="btn btn-sm btn-danger">删除</button>
-                                    </td>
-                                </tr>
-                            ))
-                        ) : (
+                    <div className="rules-table-container">
+                        <table className="rules-table">
+                            <thead>
                             <tr>
-                                <td colSpan={3} style={{ textAlign: 'center' }}>暂无规则。</td>
+                                <th>关键字</th>
+                                <th>预览</th>
+                                <th>操作</th>
                             </tr>
-                        )}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                            {config?.Rules && config.Rules.length > 0 ? (
+                                config.Rules.map((rule: ResponseRule) => (
+                                    <tr key={rule.ID}>
+                                        <td><pre>{rule.Keyword}</pre></td>
+                                        <td>
+                                                <pre>
+                                                    {rule.Response.length > 100
+                                                        ? `${rule.Response.substring(0, 100)}...`
+                                                        : rule.Response}
+                                                </pre>
+                                        </td>
+                                        <td>
+                                            <div className="actions">
+                                                <button onClick={() => handleEditClick(rule)} className="btn btn-sm btn-success">编辑</button>
+                                                <button onClick={() => handleDeleteRule(rule.ID)} className="btn btn-sm btn-danger">删除</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr>
+                                    <td colSpan={3} style={{ textAlign: 'center' }}>暂无规则。</td>
+                                </tr>
+                            )}
+                            </tbody>
+                        </table>
+                    </div>
 
-                    <div className="add-rule-form">
+                    <div className="actions" ref={ruleFormRef}>
                         <h3>{editingRuleId ? '编辑规则' : '添加新规则'}</h3>
                         <div className="form-group">
                             <label htmlFor="newKeyword">关键字</label>
